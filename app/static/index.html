@@ -26,6 +26,10 @@
         <span class="nav-icon">📋</span>
         <span>Jobs</span>
       </button>
+      <button class="nav-item" onclick="showSection('timeline')" id="nav-timeline">
+        <span class="nav-icon">📅</span>
+        <span>Timeline</span>
+      </button>
       <button class="nav-item" onclick="showSection('settings')" id="nav-settings">
         <span class="nav-icon">⚙️</span>
         <span>Settings</span>
@@ -66,6 +70,72 @@
             <h3>Loading jobs…</h3>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Timeline section -->
+    <div id="section-timeline" class="section">
+      <div class="topbar">
+        <div class="topbar-title">Timeline</div>
+        <div class="topbar-actions">
+          <div class="tl-view-toggle">
+            <button class="btn btn-ghost btn-sm tl-view-btn active" id="tl-btn-list" onclick="tlSetView('list')">☰ List</button>
+            <button class="btn btn-ghost btn-sm tl-view-btn" id="tl-btn-calendar" onclick="tlSetView('calendar')">🗓 Calendar</button>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="loadTimeline()">↻ Refresh</button>
+        </div>
+      </div>
+
+      <!-- Filter bar -->
+      <div class="tl-filters">
+        <select class="form-select" id="tl-filter-job" onchange="tlApplyFilter()" style="max-width:200px;font-size:13px;">
+          <option value="">All Jobs</option>
+        </select>
+        <div class="tl-legend">
+          <span class="tl-dot tl-dot-success"></span>Success
+          <span class="tl-dot tl-dot-fail"></span>Failed
+          <span class="tl-dot tl-dot-upcoming"></span>Upcoming
+        </div>
+      </div>
+
+      <!-- List view -->
+      <div id="tl-list-view">
+        <div id="tl-list-content" class="tl-list"></div>
+      </div>
+
+      <!-- Calendar view -->
+      <div id="tl-calendar-view" style="display:none">
+        <div class="tl-cal-nav">
+          <button class="btn btn-ghost btn-sm" onclick="tlCalPrev()">‹ Prev</button>
+          <span id="tl-cal-title" class="tl-cal-title">July 2026</span>
+          <button class="btn btn-ghost btn-sm" onclick="tlCalNext()">Next ›</button>
+        </div>
+        <div class="tl-cal-grid">
+          <div class="tl-cal-header">Sun</div>
+          <div class="tl-cal-header">Mon</div>
+          <div class="tl-cal-header">Tue</div>
+          <div class="tl-cal-header">Wed</div>
+          <div class="tl-cal-header">Thu</div>
+          <div class="tl-cal-header">Fri</div>
+          <div class="tl-cal-header">Sat</div>
+        </div>
+        <div id="tl-cal-body" class="tl-cal-grid tl-cal-days"></div>
+      </div>
+    </div>
+
+    <!-- Log detail slide-over panel -->
+    <div id="tl-detail-overlay" class="tl-detail-overlay" onclick="tlCloseDetail(event)">
+      <div class="tl-detail-panel" onclick="event.stopPropagation()">
+        <div class="tl-detail-header">
+          <div>
+            <div id="tl-detail-job-name" class="tl-detail-title">—</div>
+            <div id="tl-detail-meta" class="tl-detail-meta">—</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="tlCloseDetail()">✕</button>
+        </div>
+        <div class="tl-detail-badges" id="tl-detail-badges"></div>
+        <div class="tl-detail-section-label">Output</div>
+        <pre id="tl-detail-output" class="tl-detail-output">(no output)</pre>
       </div>
     </div>
 
@@ -130,15 +200,138 @@
             <label class="form-label" for="job-name">Name *</label>
             <input class="form-input" id="job-name" type="text" placeholder="Docker Cleanup" required />
           </div>
-          <div class="form-group">
-            <label class="form-label" for="job-schedule">
-              Cron Schedule *
-              <span class="hint" id="schedule-hint"></span>
-            </label>
-            <input class="form-input" id="job-schedule" type="text"
-              placeholder="0 3 * * *" required
-              oninput="updateScheduleHint(this.value)" />
+          <div class="form-group sp-wrap" id="schedule-picker-wrap">
+            <label class="form-label">Schedule *</label>
+
+            <!-- Frequency pills -->
+            <div class="sp-pills" id="sp-pills">
+              <button type="button" class="sp-pill" data-freq="minutely">Minutely</button>
+              <button type="button" class="sp-pill" data-freq="hourly">Hourly</button>
+              <button type="button" class="sp-pill active" data-freq="daily">Daily</button>
+              <button type="button" class="sp-pill" data-freq="weekly">Weekly</button>
+              <button type="button" class="sp-pill" data-freq="monthly">Monthly</button>
+              <button type="button" class="sp-pill" data-freq="yearly">Yearly</button>
+              <button type="button" class="sp-pill" data-freq="custom">Custom</button>
+            </div>
+
+            <!-- Minutely panel -->
+            <div class="sp-panel" id="sp-panel-minutely" style="display:none">
+              <div class="sp-row">
+                <span class="sp-lbl">Every</span>
+                <input class="sp-num" id="sp-min-every" type="number" min="1" max="59" value="15">
+                <span class="sp-lbl">minutes</span>
+              </div>
+            </div>
+
+            <!-- Hourly panel -->
+            <div class="sp-panel" id="sp-panel-hourly" style="display:none">
+              <div class="sp-row">
+                <span class="sp-lbl">Every</span>
+                <input class="sp-num" id="sp-hr-every" type="number" min="1" max="23" value="1">
+                <span class="sp-lbl">hour(s) at</span>
+                <span class="sp-lbl">:</span>
+                <input class="sp-num" id="sp-hr-min" type="number" min="0" max="59" value="0">
+              </div>
+            </div>
+
+            <!-- Daily panel -->
+            <div class="sp-panel" id="sp-panel-daily">
+              <div class="sp-row">
+                <span class="sp-lbl">Every</span>
+                <input class="sp-num" id="sp-day-every" type="number" min="1" max="31" value="1">
+                <span class="sp-lbl">day(s) at</span>
+                <input class="sp-time" id="sp-day-time" type="time" value="03:00">
+              </div>
+            </div>
+
+            <!-- Weekly panel -->
+            <div class="sp-panel" id="sp-panel-weekly" style="display:none">
+              <div class="sp-row">
+                <span class="sp-lbl">Every</span>
+                <input class="sp-num" id="sp-wk-every" type="number" min="1" max="52" value="1">
+                <span class="sp-lbl">week(s) on</span>
+              </div>
+              <div class="sp-days" id="sp-day-btns">
+                <button type="button" class="sp-day" data-d="0">Sun</button>
+                <button type="button" class="sp-day active" data-d="1">Mon</button>
+                <button type="button" class="sp-day" data-d="2">Tue</button>
+                <button type="button" class="sp-day" data-d="3">Wed</button>
+                <button type="button" class="sp-day" data-d="4">Thu</button>
+                <button type="button" class="sp-day" data-d="5">Fri</button>
+                <button type="button" class="sp-day" data-d="6">Sat</button>
+              </div>
+              <div class="sp-row">
+                <span class="sp-lbl">at</span>
+                <input class="sp-time" id="sp-wk-time" type="time" value="09:00">
+              </div>
+            </div>
+
+            <!-- Monthly panel -->
+            <div class="sp-panel" id="sp-panel-monthly" style="display:none">
+              <div class="sp-row">
+                <span class="sp-lbl">Every</span>
+                <input class="sp-num" id="sp-mo-every" type="number" min="1" max="12" value="1">
+                <span class="sp-lbl">month(s) on day</span>
+                <select class="sp-select" id="sp-mo-day">
+                  <option value="1">1st</option><option value="2">2nd</option>
+                  <option value="3">3rd</option><option value="4">4th</option>
+                  <option value="5">5th</option><option value="6">6th</option>
+                  <option value="7">7th</option><option value="8">8th</option>
+                  <option value="9">9th</option><option value="10">10th</option>
+                  <option value="11">11th</option><option value="12">12th</option>
+                  <option value="13">13th</option><option value="14">14th</option>
+                  <option value="15">15th</option><option value="16">16th</option>
+                  <option value="17">17th</option><option value="18">18th</option>
+                  <option value="19">19th</option><option value="20">20th</option>
+                  <option value="21">21st</option><option value="22">22nd</option>
+                  <option value="23">23rd</option><option value="24">24th</option>
+                  <option value="25">25th</option><option value="26">26th</option>
+                  <option value="27">27th</option><option value="28">28th</option>
+                  <option value="29">29th</option><option value="30">30th</option>
+                  <option value="31">Last</option>
+                </select>
+                <span class="sp-lbl">at</span>
+                <input class="sp-time" id="sp-mo-time" type="time" value="09:00">
+              </div>
+            </div>
+
+            <!-- Yearly panel -->
+            <div class="sp-panel" id="sp-panel-yearly" style="display:none">
+              <div class="sp-row">
+                <span class="sp-lbl">Every year on</span>
+                <select class="sp-select" id="sp-yr-month">
+                  <option value="1">January</option><option value="2">February</option>
+                  <option value="3">March</option><option value="4">April</option>
+                  <option value="5">May</option><option value="6">June</option>
+                  <option value="7">July</option><option value="8">August</option>
+                  <option value="9">September</option><option value="10">October</option>
+                  <option value="11">November</option><option value="12">December</option>
+                </select>
+                <input class="sp-num" id="sp-yr-day" type="number" min="1" max="31" value="1">
+                <span class="sp-lbl">at</span>
+                <input class="sp-time" id="sp-yr-time" type="time" value="00:00">
+              </div>
+            </div>
+
+            <!-- Custom panel -->
+            <div class="sp-panel" id="sp-panel-custom" style="display:none">
+              <input class="form-input" id="sp-custom-expr" type="text"
+                placeholder="0 3 * * *" autocomplete="off"
+                oninput="window._sp && window._sp.update()">
+              <div class="sp-cron-ref">5-field cron: <code>min hr dom mon dow</code> &nbsp; examples: <code>0 9 * * 1-5</code> &nbsp; <code>*/30 * * * *</code></div>
+            </div>
+
+            <!-- Human-readable summary -->
+            <div class="sp-summary" id="sp-summary">
+              <span id="sp-summary-text">Every day at 3:00 AM</span>
+              <span class="sp-summary-dot"></span>
+              <span id="sp-summary-cron" class="sp-summary-cron">0 3 * * *</span>
+            </div>
+
+            <!-- Hidden field consumed by backend -->
+            <input type="hidden" id="job-schedule" />
           </div>
+
         </div>
 
         <div class="form-group">

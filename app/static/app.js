@@ -21,6 +21,8 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSettings();
   setInterval(loadJobs, 15000);   // auto-refresh every 15s
   startCountdowns();
+  // Initialize schedule picker
+  window._sp = new SchedulePicker();
 });
 
 async function loadUser() {
@@ -42,7 +44,8 @@ function showSection(name) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById(`section-${name}`).classList.add('active');
   document.getElementById(`nav-${name}`).classList.add('active');
-  if (name === 'settings') loadSettings();
+  if (name === 'settings')  loadSettings();
+  if (name === 'timeline')  loadTimeline();
 }
 
 // ── API helpers ────────────────────────────────────────────────────────────
@@ -217,9 +220,10 @@ function openJobDrawer(jobId) {
     document.getElementById('job-id').value = job.id;
     document.getElementById('job-name').value = job.name;
     document.getElementById('job-description').value = job.description || '';
-    document.getElementById('job-schedule').value = job.schedule;
     document.getElementById('job-enabled').checked = job.enabled;
     setJobType(job.type);
+    // Populate schedule picker
+    if (window._sp) window._sp.setCron(job.schedule);
 
     if (job.type === 'http') {
       document.getElementById('job-http-method').value = job.http_method || 'POST';
@@ -235,9 +239,10 @@ function openJobDrawer(jobId) {
     document.getElementById('job-id').value = '';
     document.getElementById('job-enabled').checked = true;
     setJobType('http');
+    // Reset picker to daily default
+    if (window._sp) window._sp.setCron('0 3 * * *');
   }
 
-  updateScheduleHint(document.getElementById('job-schedule').value);
   overlay.classList.add('open');
 }
 
@@ -593,3 +598,487 @@ function durationMs(start, end) {
   if (ms < 60000) return `${(ms/1000).toFixed(1)}s`;
   return `${Math.floor(ms/60000)}m ${Math.floor((ms%60000)/1000)}s`;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Schedule Picker
+// ═══════════════════════════════════════════════════════════════════════════
+
+class SchedulePicker {
+  constructor() {
+    this.freq = 'daily';
+    this._attach();
+  }
+
+  _attach() {
+    // Pill clicks
+    document.querySelectorAll('.sp-pill').forEach(btn => {
+      btn.addEventListener('click', () => {
+        this._setFreq(btn.dataset.freq);
+        this.update();
+      });
+    });
+    // Day buttons
+    document.querySelectorAll('.sp-day').forEach(btn => {
+      btn.addEventListener('click', () => {
+        btn.classList.toggle('active');
+        // Ensure at least one day selected
+        const active = document.querySelectorAll('.sp-day.active');
+        if (active.length === 0) btn.classList.add('active');
+        this.update();
+      });
+    });
+    // All sub-inputs trigger update
+    document.querySelectorAll('.sp-num, .sp-time, .sp-select').forEach(el => {
+      el.addEventListener('change', () => this.update());
+      el.addEventListener('input',  () => this.update());
+    });
+    this._setFreq('daily');
+    this.update();
+  }
+
+  _setFreq(freq) {
+    this.freq = freq;
+    // Update pills
+    document.querySelectorAll('.sp-pill').forEach(b =>
+      b.classList.toggle('active', b.dataset.freq === freq));
+    // Show/hide panels
+    const panels = ['minutely','hourly','daily','weekly','monthly','yearly','custom'];
+    panels.forEach(f => {
+      const el = document.getElementById(`sp-panel-${f}`);
+      if (el) el.style.display = f === freq ? '' : 'none';
+    });
+  }
+
+  update() {
+    const cron = this.getCron();
+    const hidden = document.getElementById('job-schedule');
+    if (hidden) hidden.value = cron;
+    const text = document.getElementById('sp-summary-text');
+    const cronEl = document.getElementById('sp-summary-cron');
+    if (text)  text.textContent  = this._describe(cron);
+    if (cronEl) cronEl.textContent = cron;
+  }
+
+  getCron() {
+    const v = id => { const el = document.getElementById(id); return el ? el.value : ''; };
+    const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, parseInt(n) || lo));
+
+    switch (this.freq) {
+      case 'minutely': {
+        const every = clamp(v('sp-min-every'), 1, 59);
+        return every === 1 ? '* * * * *' : `*/${every} * * * *`;
+      }
+      case 'hourly': {
+        const every = clamp(v('sp-hr-every'), 1, 23);
+        const min   = clamp(v('sp-hr-min'), 0, 59);
+        return `${min} */${every} * * *`;
+      }
+      case 'daily': {
+        const every = clamp(v('sp-day-every'), 1, 31);
+        const [h, m] = (v('sp-day-time') || '03:00').split(':').map(Number);
+        return every === 1
+          ? `${m} ${h} * * *`
+          : `${m} ${h} */${every} * *`;
+      }
+      case 'weekly': {
+        const [h, m] = (v('sp-wk-time') || '09:00').split(':').map(Number);
+        const days   = [...document.querySelectorAll('.sp-day.active')]
+                         .map(b => b.dataset.d).sort().join(',');
+        const every  = clamp(v('sp-wk-every'), 1, 52);
+        // Standard cron doesn't support "every N weeks" natively;
+        // for N=1 use DOW, for N>1 encode as comment hint with DOW
+        return `${m} ${h} * * ${days || '1'}`;
+      }
+      case 'monthly': {
+        const every = clamp(v('sp-mo-every'), 1, 12);
+        const day   = v('sp-mo-day') || '1';
+        const [h, m] = (v('sp-mo-time') || '09:00').split(':').map(Number);
+        return every === 1
+          ? `${m} ${h} ${day} * *`
+          : `${m} ${h} ${day} */${every} *`;
+      }
+      case 'yearly': {
+        const month = v('sp-yr-month') || '1';
+        const day   = clamp(v('sp-yr-day'), 1, 31);
+        const [h, m] = (v('sp-yr-time') || '00:00').split(':').map(Number);
+        return `${m} ${h} ${day} ${month} *`;
+      }
+      case 'custom': {
+        const raw = (v('sp-custom-expr') || '').trim();
+        return raw || '* * * * *';
+      }
+    }
+    return '* * * * *';
+  }
+
+  _describe(cron) {
+    return describeCron(cron) || cron;
+  }
+
+  /** Load an existing cron string into the picker UI */
+  setCron(expr) {
+    if (!expr) return;
+    const state = this._parse(expr);
+    this._setFreq(state.freq);
+
+    const set = (id, val) => { const el = document.getElementById(id); if (el && val !== undefined) el.value = val; };
+    const pad = n => String(n).padStart(2, '0');
+    const toTime = (h, m) => `${pad(h)}:${pad(m)}`;
+
+    switch (state.freq) {
+      case 'minutely': set('sp-min-every',  state.every); break;
+      case 'hourly':
+        set('sp-hr-every', state.every);
+        set('sp-hr-min',   state.minute);
+        break;
+      case 'daily':
+        set('sp-day-every', state.every);
+        set('sp-day-time',  toTime(state.hour, state.minute));
+        break;
+      case 'weekly':
+        set('sp-wk-time', toTime(state.hour, state.minute));
+        // Set day buttons
+        document.querySelectorAll('.sp-day').forEach(b => {
+          b.classList.toggle('active', (state.days || [1]).includes(+b.dataset.d));
+        });
+        break;
+      case 'monthly':
+        set('sp-mo-every', state.every);
+        set('sp-mo-day',   state.day);
+        set('sp-mo-time',  toTime(state.hour, state.minute));
+        break;
+      case 'yearly':
+        set('sp-yr-month', state.month);
+        set('sp-yr-day',   state.day);
+        set('sp-yr-time',  toTime(state.hour, state.minute));
+        break;
+      case 'custom':
+        set('sp-custom-expr', expr);
+        break;
+    }
+    this.update();
+  }
+
+  _parse(expr) {
+    const parts = expr.trim().split(/\s+/);
+    if (parts.length !== 5) return { freq: 'custom' };
+    const [min, hour, dom, mon, dow] = parts;
+    const num = s => !isNaN(s) && s !== '*';
+
+    // Minutely
+    if (min === '*' && hour === '*' && dom === '*' && mon === '*' && dow === '*')
+      return { freq: 'minutely', every: 1 };
+    if (/^\*\/\d+$/.test(min) && hour === '*' && dom === '*' && mon === '*' && dow === '*')
+      return { freq: 'minutely', every: +min.slice(2) };
+
+    // Hourly
+    if (num(min) && (/^\*\/\d+$/.test(hour) || hour === '*') && dom === '*' && mon === '*' && dow === '*')
+      return { freq: 'hourly', minute: +min, every: hour === '*' ? 1 : +hour.slice(2) };
+
+    // Weekly (DOW set, dom=*)
+    if (num(min) && num(hour) && dom === '*' && mon === '*' && dow !== '*') {
+      const days = dow.split(',').map(d => +d.replace(/\D/g,''));
+      return { freq: 'weekly', minute: +min, hour: +hour, days };
+    }
+
+    // Daily
+    if (num(min) && num(hour) && (/^\*\/\d+$/.test(dom) || dom === '*') && mon === '*' && dow === '*')
+      return { freq: 'daily', minute: +min, hour: +hour, every: dom === '*' ? 1 : +dom.slice(2) };
+
+    // Monthly
+    if (num(min) && num(hour) && num(dom) && (/^\*\/\d+$/.test(mon) || mon === '*') && dow === '*')
+      return { freq: 'monthly', minute: +min, hour: +hour, day: +dom, every: mon === '*' ? 1 : +mon.slice(2) };
+
+    // Yearly
+    if (num(min) && num(hour) && num(dom) && num(mon) && dow === '*')
+      return { freq: 'yearly', minute: +min, hour: +hour, day: +dom, month: +mon };
+
+    return { freq: 'custom' };
+  }
+}
+
+// Replaced updateScheduleHint — no-op for compatibility
+function updateScheduleHint() {}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+//  Timeline
+// ═══════════════════════════════════════════════════════════════════════════
+
+let _tlData = { past: [], upcoming: [] };
+let _tlFilterJobId = '';
+let _tlView = 'list';
+let _tlCalYear = new Date().getFullYear();
+let _tlCalMonth = new Date().getMonth(); // 0-indexed
+
+async function loadTimeline() {
+  try {
+    _tlData = await api('GET', '/api/timeline?days=60');
+    _populateTlFilter();
+    tlRender();
+  } catch(e) {
+    console.error('Failed to load timeline', e);
+  }
+}
+
+function _populateTlFilter() {
+  const sel = document.getElementById('tl-filter-job');
+  if (!sel) return;
+  const names = new Map();
+  [..._tlData.past, ..._tlData.upcoming].forEach(r => {
+    names.set(r.job_id, r.job_name);
+  });
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All Jobs</option>' +
+    [...names.entries()].map(([id, name]) =>
+      `<option value="${id}" ${id == current ? 'selected' : ''}>${esc(name)}</option>`
+    ).join('');
+}
+
+function tlApplyFilter() {
+  _tlFilterJobId = document.getElementById('tl-filter-job').value;
+  tlRender();
+}
+
+function tlSetView(v) {
+  _tlView = v;
+  document.getElementById('tl-list-view').style.display     = v === 'list'     ? '' : 'none';
+  document.getElementById('tl-calendar-view').style.display = v === 'calendar' ? '' : 'none';
+  document.getElementById('tl-btn-list').classList.toggle('active',     v === 'list');
+  document.getElementById('tl-btn-calendar').classList.toggle('active', v === 'calendar');
+  tlRender();
+}
+
+function tlRender() {
+  if (_tlView === 'list')     tlRenderList();
+  else                        tlRenderCalendar();
+}
+
+// ── List view ───────────────────────────────────────────────────────────────
+
+function tlRenderList() {
+  const container = document.getElementById('tl-list-content');
+  if (!container) return;
+
+  const fid = _tlFilterJobId ? +_tlFilterJobId : null;
+
+  // Combine past + upcoming into a single sorted timeline
+  const items = [];
+  _tlData.past.forEach(r => {
+    if (fid && r.job_id !== fid) return;
+    items.push({ ...r, _type: 'past', _time: new Date(r.started_at + 'Z') });
+  });
+  _tlData.upcoming.forEach(r => {
+    if (fid && r.job_id !== fid) return;
+    items.push({ ...r, _type: 'upcoming', _time: new Date(r.scheduled_at) });
+  });
+
+  // Sort descending (most recent first, upcoming after)
+  const now = Date.now();
+  items.sort((a, b) => {
+    const at = a._time.getTime(), bt = b._time.getTime();
+    // Put upcoming at top of the list (future), then past descending
+    if (at > now && bt > now) return at - bt;    // both future: ascending
+    if (at > now) return -1;                      // a is future → top
+    if (bt > now) return 1;                       // b is future → top
+    return bt - at;                               // both past: most recent first
+  });
+
+  if (items.length === 0) {
+    container.innerHTML = `<div class="empty-state"><div class="empty-icon">📭</div><h3>No runs yet</h3><p>Your job run history will appear here once jobs have executed.</p></div>`;
+    return;
+  }
+
+  // Group by date
+  const groups = {};
+  const today = new Date(); today.setHours(0,0,0,0);
+  const tomorrow = new Date(today); tomorrow.setDate(today.getDate() + 1);
+
+  items.forEach(item => {
+    const d = new Date(item._time);
+    d.setHours(0,0,0,0);
+    const key = d.toISOString().slice(0, 10);
+    if (!groups[key]) groups[key] = { label: _dateLabel(d, today, tomorrow), items: [] };
+    groups[key].items.push(item);
+  });
+
+  container.innerHTML = Object.entries(groups).map(([date, group]) => `
+    <div class="tl-date-group">
+      <div class="tl-date-label">${group.label}</div>
+      ${group.items.map(item => tlRunRow(item)).join('')}
+    </div>
+  `).join('');
+}
+
+function _dateLabel(d, today, tomorrow) {
+  if (d.getTime() >= tomorrow.getTime()) {
+    const diff = Math.round((d - today) / 86400000);
+    if (diff === 1) return 'Tomorrow';
+    return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' });
+  }
+  if (d.getTime() === today.getTime()) return 'Today';
+  const diff = Math.round((today - d) / 86400000);
+  if (diff === 1) return 'Yesterday';
+  return d.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+function tlRunRow(item) {
+  const isUpcoming = item._type === 'upcoming';
+  const isRunning  = !isUpcoming && item.success === null;
+
+  let stripeClass, pillClass, pillLabel;
+  if (isUpcoming)      { stripeClass = 's-upcoming'; pillClass = 'tl-pill-upcoming'; pillLabel = 'Scheduled'; }
+  else if (isRunning)  { stripeClass = 's-running';  pillClass = 'tl-pill-running';  pillLabel = 'Running…'; }
+  else if (item.success){ stripeClass = 's-success'; pillClass = 'tl-pill-success';  pillLabel = '✓ Success'; }
+  else                  { stripeClass = 's-fail';    pillClass = 'tl-pill-fail';     pillLabel = '✕ Failed'; }
+
+  const time = item._time;
+  const timeStr = time.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  const dur = item.duration_ms != null
+    ? (item.duration_ms < 1000 ? `${item.duration_ms}ms` : item.duration_ms < 60000 ? `${(item.duration_ms/1000).toFixed(1)}s` : `${Math.floor(item.duration_ms/60000)}m`)
+    : '';
+
+  const onclick = !isUpcoming
+    ? `onclick="tlOpenDetail(${JSON.stringify(item).replace(/"/g,'&quot;')})"`
+    : '';
+
+  return `
+    <div class="tl-run-row${isUpcoming ? ' tl-upcoming' : ''}" ${onclick}>
+      <div class="tl-run-stripe ${stripeClass}"></div>
+      <div>
+        <div class="tl-run-name">${esc(item.job_name)}</div>
+        ${item.exit_code != null ? `<div class="tl-run-sub">exit ${item.exit_code}${item.schedule ? ' · ' + esc(item.schedule) : ''}</div>` : ''}
+      </div>
+      <div class="tl-run-time">${timeStr}</div>
+      <div>
+        <span class="tl-status-pill ${pillClass}">${pillLabel}</span>
+        ${dur ? `<div class="tl-run-dur">${dur}</div>` : ''}
+      </div>
+    </div>`;
+}
+
+// ── Calendar view ───────────────────────────────────────────────────────────
+
+function tlCalPrev() { _tlCalMonth--; if (_tlCalMonth < 0) { _tlCalMonth = 11; _tlCalYear--; } tlRenderCalendar(); }
+function tlCalNext() { _tlCalMonth++; if (_tlCalMonth > 11) { _tlCalMonth = 0;  _tlCalYear++; } tlRenderCalendar(); }
+
+function tlRenderCalendar() {
+  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  document.getElementById('tl-cal-title').textContent = `${MONTHS[_tlCalMonth]} ${_tlCalYear}`;
+
+  const fid = _tlFilterJobId ? +_tlFilterJobId : null;
+
+  // Build a map: date-string → [events]
+  const eventMap = {};
+  const addEvent = (dateStr, ev) => {
+    if (!eventMap[dateStr]) eventMap[dateStr] = [];
+    eventMap[dateStr].push(ev);
+  };
+
+  _tlData.past.forEach(r => {
+    if (fid && r.job_id !== fid) return;
+    if (!r.started_at) return;
+    const d = new Date(r.started_at + 'Z');
+    const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const cls = r.success === null ? 'ev-running' : r.success ? 'ev-success' : 'ev-fail';
+    addEvent(ds, { label: r.job_name, cls, item: r });
+  });
+  _tlData.upcoming.forEach(r => {
+    if (fid && r.job_id !== fid) return;
+    const d = new Date(r.scheduled_at);
+    const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    addEvent(ds, { label: r.job_name, cls: 'ev-upcoming', item: null });
+  });
+
+  // Build calendar grid
+  const firstDay = new Date(_tlCalYear, _tlCalMonth, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(_tlCalYear, _tlCalMonth + 1, 0).getDate();
+  const prevMonthDays = new Date(_tlCalYear, _tlCalMonth, 0).getDate();
+
+  const todayStr = new Date().toISOString().slice(0,10);
+  let html = '';
+
+  // Fill leading days from prev month
+  for (let i = firstDay - 1; i >= 0; i--) {
+    const day = prevMonthDays - i;
+    const month = _tlCalMonth === 0 ? 12 : _tlCalMonth;
+    const year  = _tlCalMonth === 0 ? _tlCalYear - 1 : _tlCalYear;
+    const ds = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    html += _calDay(day, ds, true, false, eventMap[ds] || []);
+  }
+
+  // Current month
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = `${_tlCalYear}-${String(_tlCalMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    html += _calDay(d, ds, false, ds === todayStr, eventMap[ds] || []);
+  }
+
+  // Fill trailing days
+  const total = firstDay + daysInMonth;
+  const trailing = total % 7 === 0 ? 0 : 7 - (total % 7);
+  for (let d = 1; d <= trailing; d++) {
+    const month = _tlCalMonth === 11 ? 1 : _tlCalMonth + 2;
+    const year  = _tlCalMonth === 11 ? _tlCalYear + 1 : _tlCalYear;
+    const ds = `${year}-${String(month).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    html += _calDay(d, ds, true, false, eventMap[ds] || []);
+  }
+
+  document.getElementById('tl-cal-body').innerHTML = html;
+}
+
+function _calDay(dayNum, dateStr, otherMonth, isToday, events) {
+  const maxShow = 3;
+  const shown = events.slice(0, maxShow);
+  const overflow = events.length - maxShow;
+  const evHtml = shown.map(ev => {
+    const onclick = ev.item
+      ? `onclick="event.stopPropagation();tlOpenDetail(${JSON.stringify(ev.item).replace(/"/g,'&quot;')})"`
+      : '';
+    return `<div class="tl-cal-event ${ev.cls}" ${onclick}>${esc(ev.label)}</div>`;
+  }).join('');
+  const moreHtml = overflow > 0 ? `<div class="tl-cal-more">+${overflow} more</div>` : '';
+  return `<div class="tl-cal-day${otherMonth ? ' tl-other-month' : ''}${isToday ? ' tl-today' : ''}">
+    <div class="tl-cal-day-num">${dayNum}</div>
+    <div class="tl-cal-events">${evHtml}${moreHtml}</div>
+  </div>`;
+}
+
+// ── Detail slide-over ───────────────────────────────────────────────────────
+
+function tlOpenDetail(item) {
+  if (!item || !item.id) return; // don't open for upcoming
+  const overlay = document.getElementById('tl-detail-overlay');
+  if (!overlay) return;
+  overlay.classList.add('open');
+
+  document.getElementById('tl-detail-job-name').textContent = item.job_name || '—';
+
+  const started  = item.started_at  ? new Date(item.started_at  + 'Z') : null;
+  const finished = item.finished_at ? new Date(item.finished_at + 'Z') : null;
+  const fmtDt = d => d ? d.toLocaleString(undefined, { month:'short', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit' }) : '—';
+  document.getElementById('tl-detail-meta').textContent = `Started: ${fmtDt(started)}`;
+
+  // Badges
+  const badgeContainer = document.getElementById('tl-detail-badges');
+  const successCls = item.success === null ? 'b-neutral' : item.success ? 'b-success' : 'b-fail';
+  const successLabel = item.success === null ? 'Running…' : item.success ? '✓ Success' : '✕ Failed';
+  const dur = item.duration_ms != null
+    ? `${item.duration_ms < 1000 ? item.duration_ms + 'ms' : item.duration_ms < 60000 ? (item.duration_ms/1000).toFixed(2) + 's' : Math.floor(item.duration_ms/60000) + 'm ' + Math.floor((item.duration_ms%60000)/1000) + 's'}`
+    : null;
+
+  badgeContainer.innerHTML =
+    `<span class="tl-detail-badge ${successCls}">${successLabel}</span>` +
+    (item.exit_code != null ? `<span class="tl-detail-badge b-neutral">exit ${item.exit_code}</span>` : '') +
+    (dur ? `<span class="tl-detail-badge b-neutral">⏱ ${dur}</span>` : '') +
+    (finished ? `<span class="tl-detail-badge b-neutral">Finished ${fmtDt(finished)}</span>` : '');
+
+  document.getElementById('tl-detail-output').textContent = item.output || '(no output)';
+}
+
+function tlCloseDetail(e) {
+  if (e && e.target !== document.getElementById('tl-detail-overlay')) return;
+  const overlay = document.getElementById('tl-detail-overlay');
+  if (overlay) overlay.classList.remove('open');
+}
+

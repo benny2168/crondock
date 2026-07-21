@@ -3,7 +3,7 @@ import os
 import secrets
 from urllib.parse import quote
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -294,6 +294,63 @@ def delete_setting(key: str, db: Session = Depends(get_db)):
 @app.get("/api/health")
 def health():
     return {"ok": True, "version": "1.0.0"}
+
+
+@app.get("/api/timeline")
+def get_timeline(days: int = 60, db: Session = Depends(get_db)):
+    """Return past run logs + upcoming scheduled runs for the Timeline view."""
+    # ── Past runs ──────────────────────────────────────────────────────────
+    from sqlalchemy import text
+    rows = (
+        db.query(JobLog, Job)
+        .join(Job, JobLog.job_id == Job.id)
+        .order_by(JobLog.started_at.desc())
+        .limit(500)
+        .all()
+    )
+    past = []
+    for log, job in rows:
+        dur = None
+        if log.started_at and log.finished_at:
+            dur = int((log.finished_at - log.started_at).total_seconds() * 1000)
+        past.append({
+            "id":          log.id,
+            "job_id":      log.job_id,
+            "job_name":    job.name,
+            "started_at":  log.started_at.isoformat() if log.started_at else None,
+            "finished_at": log.finished_at.isoformat() if log.finished_at else None,
+            "success":     log.success,
+            "exit_code":   log.exit_code,
+            "duration_ms": dur,
+            "output":      log.output or "",
+        })
+
+    # ── Upcoming runs ──────────────────────────────────────────────────────
+    upcoming = []
+    now = datetime.utcnow()
+    end = now + timedelta(days=days)
+    jobs = db.query(Job).filter(Job.enabled.is_(True)).all()
+    for job in jobs:
+        apjob = scheduler_manager._scheduler.get_job(f"job_{job.id}")
+        if not apjob:
+            continue
+        fire = apjob.next_run_time
+        count = 0
+        while fire and fire.replace(tzinfo=None) <= end and count < 100:
+            upcoming.append({
+                "job_id":       job.id,
+                "job_name":     job.name,
+                "scheduled_at": fire.isoformat(),
+                "schedule":     job.schedule,
+            })
+            try:
+                fire = apjob.trigger.get_next_fire_time(fire, fire)
+            except Exception:
+                break
+            count += 1
+
+    upcoming.sort(key=lambda x: x["scheduled_at"])
+    return {"past": past, "upcoming": upcoming}
 
 
 @app.get("/api/me")
