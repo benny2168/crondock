@@ -19,6 +19,7 @@ services:
       - OIDC_REDIRECT_URI=https://cron.server.mtcd.org/auth/callback
       # ── Session ─────────────────────────────────────────────────────────
       - SESSION_SECRET=${SESSION_SECRET}
+      - IAM_API_KEY=cd_qKGHxH9uPzHyJyV7PtbD9hpHUWuHC2Tq3P4iWIzANsA
       - SESSION_COOKIE_NAME=crondock_session
       - SESSION_MAX_AGE_HOURS=24
     networks:

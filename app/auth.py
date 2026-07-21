@@ -27,6 +27,9 @@ SESSION_SECRET      = os.getenv("SESSION_SECRET", secrets.token_hex(32))
 SESSION_COOKIE      = os.getenv("SESSION_COOKIE_NAME", "crondock_session")
 SESSION_MAX_AGE     = int(os.getenv("SESSION_MAX_AGE_HOURS", "24")) * 3600
 
+# API key for IAM portal integration (auto-generated if not set)
+IAM_API_KEY = os.getenv("IAM_API_KEY", "")
+
 _session_s = URLSafeTimedSerializer(SESSION_SECRET, salt="session")
 _state_s   = URLSafeTimedSerializer(SESSION_SECRET, salt="oidc-state")
 
@@ -72,10 +75,18 @@ def get_state_data(request: Request) -> Optional[dict]:
 # ── Session cookie ──────────────────────────────────────────────────────────
 
 def create_session(response, user: dict):
+    # Prefer full name → display_name → username fallback
+    name = (
+        user.get("name")
+        or user.get("display_name")
+        or user.get("preferred_username")
+        or user.get("email", "")
+    )
     data = {
         "sub":      user.get("sub", ""),
         "username": user.get("username") or user.get("preferred_username", ""),
         "email":    user.get("email", ""),
+        "name":     name,
     }
     token = _session_s.dumps(data)
     response.set_cookie(

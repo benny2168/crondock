@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from auth import (
-    AUTH_PROVIDER, OIDC_CLIENT_ID, OIDC_REDIRECT_URI,
+    AUTH_PROVIDER, IAM_API_KEY, OIDC_CLIENT_ID, OIDC_REDIRECT_URI,
     clear_session, create_session, decode_jwt_payload,
     exchange_code, get_oidc_config,
     get_session, get_state_data, set_state_cookie,
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 # ── Public paths (no auth required) ──────────────────────────────────────────
 
-_PUBLIC = {"/login", "/auth/start", "/auth/callback", "/auth/logout", "/api/health"}
+_PUBLIC = {"/login", "/auth/start", "/auth/callback", "/auth/logout", "/api/health", "/api/iam/roles"}
 _PUBLIC_PREFIXES = ("/static",)
 
 
@@ -296,7 +296,53 @@ def health():
     return {"ok": True, "version": "1.0.0"}
 
 
-# ── Static / SPA ───────────────────────────────────────────────────────────────
+@app.get("/api/me")
+def me(request: Request):
+    """Return the current user's display info from their session."""
+    user = get_session(request)
+    if not user:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    return {
+        "name":     user.get("name") or user.get("username", ""),
+        "email":    user.get("email", ""),
+        "username": user.get("username", ""),
+    }
+
+# ── IAM Integration API ──────────────────────────────────────────────────────────
+
+@app.get("/api/iam/roles")
+def iam_roles(request: Request):
+    """Expose app roles for the MTCD IAM portal.
+    Protected by Bearer token (IAM_API_KEY env var).
+    Returns: { "roles": [{ "id", "name", "description" }] }
+    """
+    if IAM_API_KEY:
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer ") or auth_header[7:] != IAM_API_KEY:
+            return JSONResponse({"ok": False, "error": "Unauthorized"}, status_code=401)
+    return {
+        "ok": True,
+        "app": "CronDock",
+        "roles": [
+            {
+                "id":          "admin",
+                "name":        "Administrator",
+                "description": "Full access to all cron jobs, logs, and settings.",
+            }
+        ],
+    }
+
+
+@app.get("/api/iam/key")
+def iam_key(request: Request):
+    """Return the IAM API key for admins to copy into the IAM portal."""
+    user = get_session(request)
+    if not user:
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+    return {"iam_api_key": IAM_API_KEY or "(not configured — set IAM_API_KEY env var)"}
+
+
+# ── Static / SPA ─────────────────────────────────────────────────────────────────
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
