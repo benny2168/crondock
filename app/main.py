@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from auth import (
-    OIDC_CLIENT_ID, OIDC_REDIRECT_URI,
+    AUTH_PROVIDER, OIDC_CLIENT_ID, OIDC_REDIRECT_URI,
     clear_session, create_session, decode_jwt_payload,
     exchange_code, get_oidc_config,
     get_session, get_state_data, set_state_cookie,
@@ -105,8 +105,11 @@ async def auth_start():
         f"&redirect_uri={OIDC_REDIRECT_URI}"
         f"&scope=openid+email"
         f"&state={state}"
-        f"&synossoJSSDK=False"
     )
+    # Synology SSO requires this param to use server-side redirect flow
+    # instead of its JavaScript SDK mode
+    if AUTH_PROVIDER == "synology":
+        params += "&synossoJSSDK=False"
     auth_url = f"{cfg['authorization_endpoint']}?{params}"
 
     response = RedirectResponse(auth_url, status_code=302)

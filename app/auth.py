@@ -16,7 +16,12 @@ from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 OIDC_CLIENT_ID      = os.getenv("OIDC_CLIENT_ID", "")
 OIDC_CLIENT_SECRET  = os.getenv("OIDC_CLIENT_SECRET", "")
 OIDC_DISCOVERY_URL  = os.getenv("OIDC_DISCOVERY_URL", "")
-OIDC_REDIRECT_URI   = os.getenv("OIDC_REDIRECT_URI", "https://cron.abraham16.com/auth/callback")
+OIDC_REDIRECT_URI   = os.getenv("OIDC_REDIRECT_URI", "")
+
+# AUTH_PROVIDER controls provider-specific behaviour:
+#   "synology" — adds synossoJSSDK=False to the auth URL (Synology quirk)
+#   "oidc"     — standard OIDC redirect flow, no extra params (Authentik, etc.)
+AUTH_PROVIDER = os.getenv("AUTH_PROVIDER", "oidc").lower()
 
 SESSION_SECRET      = os.getenv("SESSION_SECRET", secrets.token_hex(32))
 SESSION_COOKIE      = os.getenv("SESSION_COOKIE_NAME", "crondock_session")
