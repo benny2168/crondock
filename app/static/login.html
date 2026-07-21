@@ -201,15 +201,15 @@
 
       <div class="lock-ring">🔐</div>
       <div class="heading">Welcome back</div>
-      <div class="subheading">Sign in with your Synology account to access the dashboard.</div>
+      <div class="subheading">Sign in with your {{ provider_name }} account to access the dashboard.</div>
 
       <a href="/auth/start" class="btn-sso" id="sso-btn">
-        <div class="synology-icon">🖥</div>
-        Sign in with Synology SSO
+        <div class="synology-icon">🔑</div>
+        Sign in with {{ provider_name }}
       </a>
 
       <div class="footer">
-        Secured with OpenID Connect · Abraham Home Lab
+        Secured with OpenID Connect &middot; {{ provider_name }}
       </div>
     </div>
   </div>

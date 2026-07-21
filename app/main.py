@@ -1,4 +1,5 @@
 import logging
+import os
 import secrets
 from urllib.parse import quote
 from contextlib import asynccontextmanager
@@ -6,8 +7,9 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 from starlette.middleware.base import BaseHTTPMiddleware
 
@@ -17,6 +19,8 @@ from auth import (
     exchange_code, get_oidc_config,
     get_session, get_state_data, set_state_cookie,
 )
+
+LOGIN_PROVIDER_NAME = os.getenv("LOGIN_PROVIDER_NAME", "Synology SSO" if AUTH_PROVIDER == "synology" else "SSO")
 from database import Job, JobLog, SessionLocal, Setting, init_db, seed_defaults
 from models import (
     JobCreate, JobLogResponse, JobResponse, JobUpdate,
@@ -74,6 +78,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CronDock", version="1.0.0", lifespan=lifespan)
 app.add_middleware(AuthMiddleware)
+templates = Jinja2Templates(directory="static")
 
 
 def get_db():
@@ -88,10 +93,12 @@ def get_db():
 
 @app.get("/login")
 async def login_page(request: Request):
-    # If already logged in, go home
     if get_session(request):
         return RedirectResponse("/", status_code=302)
-    return FileResponse("static/login.html")
+    return templates.TemplateResponse(
+        "login.html",
+        {"request": request, "provider_name": LOGIN_PROVIDER_NAME},
+    )
 
 
 @app.get("/auth/start")

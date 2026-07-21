@@ -13,6 +13,7 @@ services:
       - DATA_DIR=/data
       # ── Auth provider ────────────────────────────────────────────────────
       - AUTH_PROVIDER=synology
+      - LOGIN_PROVIDER_NAME=Synology SSO
       - OIDC_CLIENT_ID=912ec6066824e2e7c382b213a7fe76dd
       - OIDC_CLIENT_SECRET=hB9hmXvib5uNQ3LD4cy7sdhUr4wRpiKY
       - OIDC_DISCOVERY_URL=https://sso.abraham16.com/webman/sso/.well-known/openid-configuration
