@@ -11,6 +11,15 @@ services:
     environment:
       - TZ=America/Chicago
       - DATA_DIR=/data
+      # ── Synology SSO (OIDC) ─────────────────────────────────────────────
+      - OIDC_CLIENT_ID=912ec6066824e2e7c382b213a7fe76dd
+      - OIDC_CLIENT_SECRET=hB9hmXvib5uNQ3LD4cy7sdhUr4wRpiKY
+      - OIDC_DISCOVERY_URL=https://sso.abraham16.com/webman/sso/.well-known/openid-configuration
+      - OIDC_REDIRECT_URI=https://cron.abraham16.com/auth/callback
+      # ── Session ─────────────────────────────────────────────────────────
+      - SESSION_SECRET=76d2a63f17d652601113e968aca6f4d613ba55941b5ec98f34f777ed76ebda42
+      - SESSION_COOKIE_NAME=crondock_session
+      - SESSION_MAX_AGE_HOURS=24
     networks:
       - default
       - proxynet

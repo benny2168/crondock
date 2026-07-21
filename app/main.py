@@ -1,13 +1,21 @@
 import logging
+import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+from starlette.middleware.base import BaseHTTPMiddleware
 
+from auth import (
+    OIDC_CLIENT_ID, OIDC_REDIRECT_URI,
+    clear_session, create_session, decode_jwt_payload,
+    exchange_code, generate_pkce, get_oidc_config,
+    get_session, get_state_data, set_state_cookie,
+)
 from database import Job, JobLog, SessionLocal, Setting, init_db, seed_defaults
 from models import (
     JobCreate, JobLogResponse, JobResponse, JobUpdate,
@@ -21,6 +29,32 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# ── Public paths (no auth required) ──────────────────────────────────────────
+
+_PUBLIC = {"/login", "/auth/start", "/auth/callback", "/auth/logout", "/api/health"}
+_PUBLIC_PREFIXES = ("/static",)
+
+
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+
+        # Allow public paths
+        if path in _PUBLIC or any(path.startswith(p) for p in _PUBLIC_PREFIXES):
+            return await call_next(request)
+
+        user = get_session(request)
+
+        if not user:
+            if path.startswith("/api"):
+                return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+            return RedirectResponse("/login", status_code=302)
+
+        request.state.user = user
+        return await call_next(request)
+
+
+# ── Lifespan ───────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -28,11 +62,17 @@ async def lifespan(app: FastAPI):
     seed_defaults()
     scheduler_manager.start()
     scheduler_manager.load_jobs_from_db()
+    # Pre-fetch OIDC config so first login is fast
+    try:
+        await get_oidc_config()
+    except Exception as e:
+        logger.warning(f"Could not pre-fetch OIDC config: {e}")
     yield
     scheduler_manager.stop()
 
 
 app = FastAPI(title="CronDock", version="1.0.0", lifespan=lifespan)
+app.add_middleware(AuthMiddleware)
 
 
 def get_db():
@@ -41,6 +81,84 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+# ── Auth routes ────────────────────────────────────────────────────────────────
+
+@app.get("/login")
+async def login_page(request: Request):
+    # If already logged in, go home
+    if get_session(request):
+        return RedirectResponse("/", status_code=302)
+    return FileResponse("static/login.html")
+
+
+@app.get("/auth/start")
+async def auth_start():
+    cfg = await get_oidc_config()
+    state = secrets.token_urlsafe(32)
+    verifier, challenge = generate_pkce()
+
+    params = (
+        f"response_type=code"
+        f"&client_id={OIDC_CLIENT_ID}"
+        f"&redirect_uri={OIDC_REDIRECT_URI}"
+        f"&scope=openid+email"
+        f"&state={state}"
+        f"&code_challenge={challenge}"
+        f"&code_challenge_method=S256"
+    )
+    auth_url = f"{cfg['authorization_endpoint']}?{params}"
+
+    response = RedirectResponse(auth_url, status_code=302)
+    set_state_cookie(response, state, verifier)
+    return response
+
+
+@app.get("/auth/callback")
+async def auth_callback(request: Request, code: str = "", state: str = "", error: str = ""):
+    if error:
+        logger.warning(f"OIDC error: {error}")
+        return RedirectResponse("/login?error=access_denied", status_code=302)
+
+    state_data = get_state_data(request)
+    if not state_data or state_data.get("state") != state:
+        logger.warning("OIDC state mismatch")
+        return RedirectResponse("/login?error=state_mismatch", status_code=302)
+
+    try:
+        tokens = await exchange_code(code, state_data["verifier"])
+    except Exception as e:
+        logger.error(f"Token exchange failed: {e}")
+        return RedirectResponse("/login?error=token_exchange", status_code=302)
+
+    id_token = tokens.get("id_token", "")
+    user = decode_jwt_payload(id_token)
+
+    if not user:
+        return RedirectResponse("/login?error=invalid_token", status_code=302)
+
+    logger.info(f"User logged in: {user.get('username') or user.get('email')}")
+    response = RedirectResponse("/", status_code=302)
+    # Clear state cookie
+    response.delete_cookie("crondock_oidc_state")
+    create_session(response, user)
+    return response
+
+
+@app.get("/auth/logout")
+async def logout():
+    response = RedirectResponse("/login", status_code=302)
+    clear_session(response)
+    return response
+
+
+@app.get("/api/me")
+async def me(request: Request):
+    user = get_session(request)
+    if not user:
+        raise HTTPException(401, "Not authenticated")
+    return user
 
 
 # ── Jobs ───────────────────────────────────────────────────────────────────────
@@ -120,14 +238,13 @@ def run_now(job_id: int, db: Session = Depends(get_db)):
 
 @app.get("/api/jobs/{job_id}/logs", response_model=List[JobLogResponse])
 def get_logs(job_id: int, limit: int = 50, db: Session = Depends(get_db)):
-    logs = (
+    return (
         db.query(JobLog)
         .filter(JobLog.job_id == job_id)
         .order_by(JobLog.started_at.desc())
         .limit(limit)
         .all()
     )
-    return logs
 
 
 # ── Settings ───────────────────────────────────────────────────────────────────
@@ -175,7 +292,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @app.get("/")
-async def root():
+async def root(request: Request):
     return FileResponse("static/index.html")
 
 

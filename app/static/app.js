@@ -16,11 +16,24 @@ let _pendingDeleteSettingKey = null;
 // ── Init ───────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
+  loadUser();
   loadJobs();
   loadSettings();
   setInterval(loadJobs, 15000);   // auto-refresh every 15s
   startCountdowns();
 });
+
+async function loadUser() {
+  try {
+    const user = await api('GET', '/api/me');
+    const nameEl  = document.getElementById('user-name');
+    const emailEl = document.getElementById('user-email');
+    if (nameEl)  nameEl.textContent  = user.username || user.email || 'User';
+    if (emailEl) emailEl.textContent = user.email || '';
+  } catch (e) {
+    // If 401, middleware will redirect — nothing to do here
+  }
+}
 
 // ── Navigation ─────────────────────────────────────────────────────────────
 
