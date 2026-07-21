@@ -20,6 +20,8 @@ services:
       - SESSION_SECRET=76d2a63f17d652601113e968aca6f4d613ba55941b5ec98f34f777ed76ebda42
       - SESSION_COOKIE_NAME=crondock_session
       - SESSION_MAX_AGE_HOURS=24
+    extra_hosts:
+      - "sso.abraham16.com:172.28.18.5"
     networks:
       - default
       - proxynet
