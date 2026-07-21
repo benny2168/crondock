@@ -1,0 +1,20 @@
+services:
+  crondock:
+    build: .
+    image: benny2168/crondock:latest
+    container_name: crondock
+    restart: unless-stopped
+    ports:
+      - "3900:8000"
+    volumes:
+      - /Users/benny2168/Dockers/crondock/data:/data
+    environment:
+      - TZ=America/Chicago
+      - DATA_DIR=/data
+    networks:
+      - default
+      - proxynet
+
+networks:
+  proxynet:
+    external: true

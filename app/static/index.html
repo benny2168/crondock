@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CronDock — Cron Job Manager</title>
+  <meta name="description" content="Self-hosted cron job manager with a beautiful web UI. Schedule shell commands and HTTP requests." />
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⏱</text></svg>" />
+</head>
+<body>
+<div class="app">
+
+  <!-- ── Sidebar ─────────────────────────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="logo">
+      <div class="logo-icon">⏱</div>
+      <div>
+        <div class="logo-text">CronDock</div>
+        <div class="logo-sub">v1.0.0</div>
+      </div>
+    </div>
+
+    <nav class="nav">
+      <button class="nav-item active" onclick="showSection('jobs')" id="nav-jobs">
+        <span class="nav-icon">📋</span>
+        <span>Jobs</span>
+      </button>
+      <button class="nav-item" onclick="showSection('settings')" id="nav-settings">
+        <span class="nav-icon">⚙️</span>
+        <span>Settings</span>
+      </button>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div>Scheduler active</div>
+      <div id="job-count-footer" style="color: var(--accent);">— jobs</div>
+    </div>
+  </aside>
+
+  <!-- ── Main ────────────────────────────────────────────────────── -->
+  <main class="main">
+
+    <!-- Jobs section -->
+    <div id="section-jobs" class="section active">
+      <div class="topbar">
+        <div class="topbar-title">Cron Jobs</div>
+        <div class="topbar-actions">
+          <button class="btn btn-ghost btn-sm" onclick="refreshJobs()" id="refresh-btn">↻ Refresh</button>
+          <button class="btn btn-primary btn-sm" onclick="openJobDrawer(null)">＋ New Job</button>
+        </div>
+      </div>
+      <div class="content-area">
+        <div class="jobs-grid" id="jobs-grid">
+          <div class="empty-state">
+            <div class="empty-icon">🕐</div>
+            <h3>Loading jobs…</h3>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Settings section -->
+    <div id="section-settings" class="section">
+      <div class="topbar">
+        <div class="topbar-title">Global Settings</div>
+        <div class="topbar-actions">
+          <button class="btn btn-primary btn-sm" onclick="openSettingDrawer(null)">＋ Add Setting</button>
+        </div>
+      </div>
+      <div class="content-area">
+        <p style="font-size:13px; color:var(--text-dim); margin-bottom:18px;">
+          Use <code style="font-family:'JetBrains Mono',monospace; background:rgba(255,255,255,0.06); padding:2px 6px; border-radius:4px; color:var(--accent2);">{{KEY}}</code>
+          placeholders in job commands, URLs, or headers to reference these values at runtime.
+        </p>
+        <div class="settings-table">
+          <div class="settings-row header">
+            <div>Key</div>
+            <div>Value</div>
+            <div>Description</div>
+            <div>Actions</div>
+          </div>
+          <div id="settings-list">
+            <div class="empty-state" style="padding:30px;">
+              <div class="spinner"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ── Job Drawer ───────────────────────────────────────────────── -->
+<div class="drawer-overlay" id="job-drawer-overlay" onclick="closeJobDrawer(event)">
+  <div class="drawer" onclick="event.stopPropagation()">
+    <div class="drawer-header">
+      <div class="drawer-title" id="job-drawer-title">New Job</div>
+      <button class="btn btn-ghost btn-icon" onclick="closeJobDrawer()">✕</button>
+    </div>
+    <div class="drawer-body">
+      <form id="job-form" onsubmit="saveJob(event)">
+        <input type="hidden" id="job-id" />
+
+        <!-- Type selector -->
+        <div class="form-group">
+          <div class="form-label">Job Type</div>
+          <div class="type-toggle">
+            <button type="button" class="type-btn active" id="type-btn-http" onclick="setJobType('http')">
+              🌐 HTTP Request
+            </button>
+            <button type="button" class="type-btn" id="type-btn-shell" onclick="setJobType('shell')">
+              💻 Shell Command
+            </button>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="job-name">Name *</label>
+            <input class="form-input" id="job-name" type="text" placeholder="Docker Cleanup" required />
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="job-schedule">
+              Cron Schedule *
+              <span class="hint" id="schedule-hint"></span>
+            </label>
+            <input class="form-input" id="job-schedule" type="text"
+              placeholder="0 3 * * *" required
+              oninput="updateScheduleHint(this.value)" />
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="job-description">Description</label>
+          <input class="form-input" id="job-description" type="text" placeholder="What does this job do?" />
+        </div>
+
+        <!-- HTTP fields -->
+        <div id="http-fields">
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label" for="job-http-method">Method</label>
+              <select class="form-select" id="job-http-method">
+                <option value="GET">GET</option>
+                <option value="POST" selected>POST</option>
+                <option value="PUT">PUT</option>
+                <option value="PATCH">PATCH</option>
+                <option value="DELETE">DELETE</option>
+              </select>
+            </div>
+            <div class="form-group" style="grid-column:auto">
+              &nbsp;
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="job-http-url">URL *</label>
+            <input class="form-input" id="job-http-url" type="text"
+              placeholder="{{ABRAHAM_PORTAINER_URL}}/api/..." />
+            <div class="code-hint">Supports <code>{{SETTING_KEY}}</code> placeholders</div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="job-http-headers">Headers <span class="hint">— JSON object</span></label>
+            <textarea class="form-textarea" id="job-http-headers"
+              placeholder='{"X-API-Key": "{{MY_TOKEN}}", "Content-Type": "application/json"}'
+              style="min-height:70px;"></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="job-http-body">Body <span class="hint">— optional</span></label>
+            <textarea class="form-textarea" id="job-http-body" placeholder='{"key": "value"}'
+              style="min-height:60px;"></textarea>
+          </div>
+        </div>
+
+        <!-- Shell fields -->
+        <div id="shell-fields" style="display:none;">
+          <div class="form-group">
+            <label class="form-label" for="job-command">Shell Command *</label>
+            <textarea class="form-textarea" id="job-command"
+              placeholder="curl -X POST https://example.com/api/run"
+              style="min-height:100px;"></textarea>
+            <div class="code-hint">
+              Runs in <code>/bin/sh</code>. Supports <code>{{SETTING_KEY}}</code> placeholders.
+            </div>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="form-group">
+          <div class="toggle-group">
+            <label class="toggle" for="job-enabled">
+              <input type="checkbox" id="job-enabled" checked />
+              <div class="toggle-track"></div>
+            </label>
+            <span style="font-size:13px;">Enable this job immediately</span>
+          </div>
+        </div>
+
+      </form>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-ghost" onclick="closeJobDrawer()">Cancel</button>
+      <button class="btn btn-primary" onclick="document.getElementById('job-form').requestSubmit()" id="save-job-btn">
+        Save Job
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Setting Drawer ───────────────────────────────────────────── -->
+<div class="drawer-overlay" id="setting-drawer-overlay" onclick="closeSettingDrawer(event)">
+  <div class="drawer" onclick="event.stopPropagation()">
+    <div class="drawer-header">
+      <div class="drawer-title" id="setting-drawer-title">New Setting</div>
+      <button class="btn btn-ghost btn-icon" onclick="closeSettingDrawer()">✕</button>
+    </div>
+    <div class="drawer-body">
+      <form id="setting-form" onsubmit="saveSetting(event)">
+        <div class="form-group">
+          <label class="form-label" for="setting-key">Key *</label>
+          <input class="form-input" id="setting-key" type="text"
+            placeholder="ABRAHAM_PORTAINER_TOKEN" required
+            style="font-family:'JetBrains Mono',monospace;" />
+          <div class="code-hint">Use UPPER_SNAKE_CASE. Reference in jobs as <code>{{KEY}}</code></div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="setting-value">Value *</label>
+          <textarea class="form-textarea" id="setting-value"
+            placeholder="Enter value…" required></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="setting-desc">Description</label>
+          <input class="form-input" id="setting-desc" type="text"
+            placeholder="What is this setting for?" />
+        </div>
+
+        <div class="form-group">
+          <div class="toggle-group">
+            <label class="toggle" for="setting-secret">
+              <input type="checkbox" id="setting-secret" />
+              <div class="toggle-track"></div>
+            </label>
+            <span style="font-size:13px;">Mark as secret (value hidden in UI)</span>
+          </div>
+        </div>
+      </form>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-ghost" onclick="closeSettingDrawer()">Cancel</button>
+      <button class="btn btn-primary" onclick="document.getElementById('setting-form').requestSubmit()">
+        Save Setting
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Log Modal ────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="log-modal-overlay" onclick="closeLogModal(event)">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-header">
+      <div class="modal-title" id="log-modal-title">Execution Logs</div>
+      <button class="btn btn-ghost btn-icon" onclick="closeLogModal()">✕</button>
+    </div>
+    <div class="modal-body" id="log-modal-body">
+    </div>
+  </div>
+</div>
+
+<!-- ── Toast container ──────────────────────────────────────────── -->
+<div class="toast-container" id="toast-container"></div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
