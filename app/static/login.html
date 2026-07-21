@@ -218,15 +218,18 @@
     // Show error messages from callback
     const params = new URLSearchParams(location.search);
     const error = params.get('error');
+    const detail = params.get('detail');
     const messages = {
       access_denied:    'Access was denied by the SSO provider.',
       state_mismatch:   'Security check failed. Please try again.',
-      token_exchange:   'Failed to complete login. Please try again.',
+      token_exchange:   'Token exchange failed.',
       invalid_token:    'Invalid response from SSO server.',
     };
     if (error && messages[error]) {
       const banner = document.getElementById('error-banner');
-      banner.textContent = '⚠ ' + messages[error];
+      let msg = '⚠ ' + messages[error];
+      if (detail) msg += `<br><code style="font-size:11px;opacity:0.8;">${detail}</code>`;
+      banner.innerHTML = msg;
       banner.classList.add('visible');
     }
 

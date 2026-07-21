@@ -3,9 +3,11 @@ import hashlib
 import json
 import os
 import secrets
+from functools import partial
 from typing import Optional
 
-import httpx
+import asyncio
+import requests as _requests
 from fastapi import Request
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
@@ -32,30 +34,20 @@ async def get_oidc_config() -> dict:
     global _oidc_config
     if _oidc_config:
         return _oidc_config
-    async with httpx.AsyncClient(verify=True, timeout=10) as client:
-        resp = await client.get(OIDC_DISCOVERY_URL)
-        resp.raise_for_status()
-        _oidc_config = resp.json()
+    loop = asyncio.get_event_loop()
+    resp = await loop.run_in_executor(
+        None,
+        partial(_requests.get, OIDC_DISCOVERY_URL, timeout=15)
+    )
+    resp.raise_for_status()
+    _oidc_config = resp.json()
     return _oidc_config
 
 
-# ── PKCE helpers ────────────────────────────────────────────────────────────
+# ── State cookie (short-lived, for CSRF protection) ───────────────────────
 
-def generate_pkce() -> tuple[str, str]:
-    """Return (code_verifier, code_challenge)."""
-    verifier = secrets.token_urlsafe(64)
-    challenge = (
-        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
-        .decode()
-        .rstrip("=")
-    )
-    return verifier, challenge
-
-
-# ── State cookie (short-lived, for PKCE round-trip) ────────────────────────
-
-def set_state_cookie(response, state: str, verifier: str):
-    token = _state_s.dumps({"state": state, "verifier": verifier})
+def set_state_cookie(response, state: str):
+    token = _state_s.dumps({"state": state})
     response.set_cookie(
         "crondock_oidc_state", token,
         max_age=600, httponly=True, samesite="lax", secure=True,
@@ -115,20 +107,40 @@ def decode_jwt_payload(token: str) -> dict:
 
 # ── Token exchange ──────────────────────────────────────────────────────────
 
-async def exchange_code(code: str, code_verifier: str) -> dict:
+import logging as _logging
+_log = _logging.getLogger(__name__)
+
+
+async def exchange_code(code: str) -> dict:
+    """Exchange authorization code for tokens using requests in a thread executor.
+    Uses the synchronous `requests` library (same as slideshow app) to avoid
+    httpx timeout issues with Synology SSO over OrbStack networking."""
     cfg = await get_oidc_config()
-    async with httpx.AsyncClient(verify=True, timeout=15) as client:
-        resp = await client.post(
+    payload = {
+        "grant_type":    "authorization_code",
+        "code":          code,
+        "redirect_uri":  OIDC_REDIRECT_URI,
+        "client_id":     OIDC_CLIENT_ID,
+        "client_secret": OIDC_CLIENT_SECRET,
+    }
+    _log.info(f"Token exchange → {cfg['token_endpoint']}")
+
+    def _do_post():
+        return _requests.post(
             cfg["token_endpoint"],
-            data={
-                "grant_type":    "authorization_code",
-                "code":          code,
-                "redirect_uri":  OIDC_REDIRECT_URI,
-                "client_id":     OIDC_CLIENT_ID,
-                "client_secret": OIDC_CLIENT_SECRET,
-                "code_verifier": code_verifier,
-            },
+            data=payload,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=30,
+            verify=True,
         )
-        resp.raise_for_status()
-        return resp.json()
+
+    loop = asyncio.get_event_loop()
+    resp = await loop.run_in_executor(None, _do_post)
+
+    _log.info(f"Token response: HTTP {resp.status_code} — {resp.text[:500]}")
+    resp.raise_for_status()
+    data = resp.json()
+    if "error" in data:
+        raise ValueError(f"SSO error: {data.get('error')} — {data.get('error_description', '')}")
+    return data
+

@@ -1,5 +1,6 @@
 import logging
 import secrets
+from urllib.parse import quote
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import List, Optional
@@ -13,7 +14,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from auth import (
     OIDC_CLIENT_ID, OIDC_REDIRECT_URI,
     clear_session, create_session, decode_jwt_payload,
-    exchange_code, generate_pkce, get_oidc_config,
+    exchange_code, get_oidc_config,
     get_session, get_state_data, set_state_cookie,
 )
 from database import Job, JobLog, SessionLocal, Setting, init_db, seed_defaults
@@ -97,7 +98,6 @@ async def login_page(request: Request):
 async def auth_start():
     cfg = await get_oidc_config()
     state = secrets.token_urlsafe(32)
-    verifier, challenge = generate_pkce()
 
     params = (
         f"response_type=code"
@@ -105,13 +105,12 @@ async def auth_start():
         f"&redirect_uri={OIDC_REDIRECT_URI}"
         f"&scope=openid+email"
         f"&state={state}"
-        f"&code_challenge={challenge}"
-        f"&code_challenge_method=S256"
+        f"&synossoJSSDK=False"
     )
     auth_url = f"{cfg['authorization_endpoint']}?{params}"
 
     response = RedirectResponse(auth_url, status_code=302)
-    set_state_cookie(response, state, verifier)
+    set_state_cookie(response, state)
     return response
 
 
@@ -127,10 +126,11 @@ async def auth_callback(request: Request, code: str = "", state: str = "", error
         return RedirectResponse("/login?error=state_mismatch", status_code=302)
 
     try:
-        tokens = await exchange_code(code, state_data["verifier"])
+        tokens = await exchange_code(code)
     except Exception as e:
-        logger.error(f"Token exchange failed: {e}")
-        return RedirectResponse("/login?error=token_exchange", status_code=302)
+        detail = quote(str(e)[:120], safe='')
+        logger.error(f"Token exchange failed [{type(e).__name__}]: {e!r}")
+        return RedirectResponse(f"/login?error=token_exchange&detail={detail}", status_code=302)
 
     id_token = tokens.get("id_token", "")
     user = decode_jwt_payload(id_token)
