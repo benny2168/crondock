@@ -20,7 +20,8 @@ from auth import (
     get_session, get_state_data, set_state_cookie,
 )
 
-LOGIN_PROVIDER_NAME = os.getenv("LOGIN_PROVIDER_NAME", "Synology SSO" if AUTH_PROVIDER == "synology" else "SSO")
+LOGIN_PROVIDER_NAME = os.getenv("LOGIN_PROVIDER_NAME", "Authentik SSO" if AUTH_PROVIDER == "oidc" else "Synology SSO")
+APP_VERSION = "1.1.0"
 from database import Job, JobLog, SessionLocal, Setting, init_db, seed_defaults
 from models import (
     JobCreate, JobLogResponse, JobResponse, JobUpdate,
@@ -59,10 +60,11 @@ class AuthMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
-# ── Lifespan ───────────────────────────────────────────────────────────────────
+# ── App lifecycle ─────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logger.info(f"Starting CronDock v{APP_VERSION}...")
     init_db()
     seed_defaults()
     scheduler_manager.start()
@@ -73,10 +75,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Could not pre-fetch OIDC config: {e}")
     yield
+    logger.info("Shutting down CronDock...")
     scheduler_manager.stop()
 
 
-app = FastAPI(title="CronDock", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="CronDock", version=APP_VERSION, lifespan=lifespan)
 app.add_middleware(AuthMiddleware)
 templates = Jinja2Templates(directory="static")
 
@@ -293,7 +296,7 @@ def delete_setting(key: str, db: Session = Depends(get_db)):
 
 @app.get("/api/health")
 def health():
-    return {"ok": True, "version": "1.0.0"}
+    return {"ok": True, "version": APP_VERSION}
 
 
 @app.get("/api/timeline")

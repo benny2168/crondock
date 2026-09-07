@@ -2,7 +2,7 @@ FROM python:3.11-alpine
 
 LABEL org.opencontainers.image.title="CronDock"
 LABEL org.opencontainers.image.description="Visual cron job manager with web UI"
-LABEL org.opencontainers.image.source="https://github.com/benny2168/crondock"
+LABEL org.opencontainers.image.source="https://github.com/mtcdtech/crondock"
 
 # Runtime deps (curl available for shell jobs)
 RUN apk add --no-cache curl tzdata bash

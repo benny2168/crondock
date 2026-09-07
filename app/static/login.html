@@ -142,7 +142,7 @@
 
     .btn-sso:active { transform: translateY(0); }
 
-    .synology-icon {
+    .sso-icon, .synology-icon {
       width: 22px; height: 22px;
       background: rgba(255,255,255,0.2);
       border-radius: 6px;
@@ -204,7 +204,7 @@
       <div class="subheading">Sign in with your {{ provider_name }} account to access the dashboard.</div>
 
       <a href="/auth/start" class="btn-sso" id="sso-btn">
-        <div class="synology-icon">🔑</div>
+        <div class="sso-icon">🔐</div>
         Sign in with {{ provider_name }}
       </a>
 
