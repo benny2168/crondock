@@ -116,14 +116,14 @@ def seed_defaults():
             ))
             db.add(Job(
                 name="Docker Images Cleanup — Abraham Synology",
-                description="Remove dangling/unused Docker images from Abraham Synology NAS via Portainer API",
+                description="Remove all unused Docker images from Abraham Synology NAS via Portainer API",
                 type="http",
                 schedule="35 3 * * *",
                 enabled=True,
                 http_method="POST",
                 http_url=(
                     "{{ABRAHAM_PORTAINER_URL}}/api/endpoints/{{ABRAHAM_SYNOLOGY_ENDPOINT_ID}}"
-                    "/docker/images/prune?filters=%7B%22dangling%22%3A%5B%22true%22%5D%7D"
+                    "/docker/images/prune?filters=%7B%22dangling%22%3A%5B%22false%22%5D%7D"
                 ),
                 http_headers='{"X-API-Key": "{{ABRAHAM_PORTAINER_TOKEN}}"}',
                 http_body=None,
@@ -144,14 +144,14 @@ def seed_defaults():
             ))
             db.add(Job(
                 name="Docker Images Cleanup — Mac Mini",
-                description="Remove dangling/unused Docker images from Ben-Mac-Mini via Portainer API",
+                description="Remove all unused Docker images from Ben-Mac-Mini via Portainer API",
                 type="http",
                 schedule="45 3 * * *",
                 enabled=True,
                 http_method="POST",
                 http_url=(
                     "{{ABRAHAM_PORTAINER_URL}}/api/endpoints/{{ABRAHAM_MACMINI_ENDPOINT_ID}}"
-                    "/docker/images/prune?filters=%7B%22dangling%22%3A%5B%22true%22%5D%7D"
+                    "/docker/images/prune?filters=%7B%22dangling%22%3A%5B%22false%22%5D%7D"
                 ),
                 http_headers='{"X-API-Key": "{{ABRAHAM_PORTAINER_TOKEN}}"}',
                 http_body=None,
