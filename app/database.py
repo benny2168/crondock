@@ -85,12 +85,14 @@ def seed_defaults():
     try:
         # ── Global settings ──────────────────────────────────────────────
         defaults = [
-            ("ABRAHAM_PORTAINER_URL",         "https://docker.abraham16.com",                         "Abraham Portainer base URL",          False),
-            ("ABRAHAM_PORTAINER_TOKEN",        "ptr_LAYVFvw5+DscmC2s2QsM+5aeO6iXGYcR4+KwjH7f/eU=",  "Abraham Portainer API token",          True),
-            ("ABRAHAM_PORTAINER_ENDPOINT_ID",  "5",                                                    "Abraham Synology Docker endpoint ID", False),
-            ("MTCD_PORTAINER_URL",             "https://docker.server.mtcd.org",                       "MTCD Portainer base URL",             False),
-            ("MTCD_PORTAINER_TOKEN",           "ptr_caKh16OVXC+3G4shu9s7TXtumDZY04R6wwaOYkq+Pls=",  "MTCD Portainer API token",             True),
-            ("MTCD_PORTAINER_ENDPOINT_ID",     "2",                                                    "MTCD Synology Docker endpoint ID",    False),
+            ("ABRAHAM_PORTAINER_URL",          "https://docker.abraham16.com",                         "Abraham Portainer base URL",           False),
+            ("ABRAHAM_PORTAINER_TOKEN",         "ptr_LAYVFvw5+DscmC2s2QsM+5aeO6iXGYcR4+KwjH7f/eU=",   "Abraham Portainer API token",           True),
+            ("ABRAHAM_SYNOLOGY_ENDPOINT_ID",   "5",                                                    "Abraham Synology Docker endpoint ID",  False),
+            ("ABRAHAM_MACMINI_ENDPOINT_ID",    "3",                                                    "Abraham Mac Mini Docker endpoint ID",  False),
+            ("ABRAHAM_PORTAINER_ENDPOINT_ID",   "5",                                                    "Legacy Abraham Docker endpoint ID",    False),
+            ("MTCD_PORTAINER_URL",              "https://docker.server.mtcd.org",                       "MTCD Portainer base URL",              False),
+            ("MTCD_PORTAINER_TOKEN",            "ptr_caKh16OVXC+3G4shu9s7TXtumDZY04R6wwaOYkq+Pls=",   "MTCD Portainer API token",              True),
+            ("MTCD_PORTAINER_ENDPOINT_ID",      "2",                                                    "MTCD Synology Docker endpoint ID",     False),
         ]
         for key, value, desc, secret in defaults:
             if not db.query(Setting).filter(Setting.key == key).first():
@@ -99,31 +101,59 @@ def seed_defaults():
         # ── Default jobs ─────────────────────────────────────────────────
         if db.query(Job).count() == 0:
             db.add(Job(
-                name="Docker Cleanup — Abraham",
-                description="Remove unused Docker images from Abraham Synology NAS via Portainer API",
+                name="Docker Containers Cleanup — Abraham Synology",
+                description="Remove stopped/unused Docker containers on Abraham Synology NAS via Portainer API",
                 type="http",
                 schedule="30 3 * * *",
                 enabled=True,
                 http_method="POST",
                 http_url=(
-                    "{{ABRAHAM_PORTAINER_URL}}/api/endpoints/{{ABRAHAM_PORTAINER_ENDPOINT_ID}}"
-                    "/docker/images/prune?filters=%7B%22dangling%22%3A%5B%22false%22%5D%7D"
+                    "{{ABRAHAM_PORTAINER_URL}}/api/endpoints/{{ABRAHAM_SYNOLOGY_ENDPOINT_ID}}"
+                    "/docker/containers/prune"
                 ),
                 http_headers='{"X-API-Key": "{{ABRAHAM_PORTAINER_TOKEN}}"}',
                 http_body=None,
             ))
             db.add(Job(
-                name="Docker Cleanup — MTCD",
-                description="Remove unused Docker images from MTCD Synology NAS via Portainer API",
+                name="Docker Images Cleanup — Abraham Synology",
+                description="Remove dangling/unused Docker images from Abraham Synology NAS via Portainer API",
                 type="http",
-                schedule="0 3 * * *",
+                schedule="35 3 * * *",
                 enabled=True,
                 http_method="POST",
                 http_url=(
-                    "{{MTCD_PORTAINER_URL}}/api/endpoints/{{MTCD_PORTAINER_ENDPOINT_ID}}"
-                    "/docker/images/prune?filters=%7B%22dangling%22%3A%5B%22false%22%5D%7D"
+                    "{{ABRAHAM_PORTAINER_URL}}/api/endpoints/{{ABRAHAM_SYNOLOGY_ENDPOINT_ID}}"
+                    "/docker/images/prune?filters=%7B%22dangling%22%3A%5B%22true%22%5D%7D"
                 ),
-                http_headers='{"X-API-Key": "{{MTCD_PORTAINER_TOKEN}}"}',
+                http_headers='{"X-API-Key": "{{ABRAHAM_PORTAINER_TOKEN}}"}',
+                http_body=None,
+            ))
+            db.add(Job(
+                name="Docker Containers Cleanup — Mac Mini",
+                description="Remove stopped/unused Docker containers on Ben-Mac-Mini via Portainer API",
+                type="http",
+                schedule="40 3 * * *",
+                enabled=True,
+                http_method="POST",
+                http_url=(
+                    "{{ABRAHAM_PORTAINER_URL}}/api/endpoints/{{ABRAHAM_MACMINI_ENDPOINT_ID}}"
+                    "/docker/containers/prune"
+                ),
+                http_headers='{"X-API-Key": "{{ABRAHAM_PORTAINER_TOKEN}}"}',
+                http_body=None,
+            ))
+            db.add(Job(
+                name="Docker Images Cleanup — Mac Mini",
+                description="Remove dangling/unused Docker images from Ben-Mac-Mini via Portainer API",
+                type="http",
+                schedule="45 3 * * *",
+                enabled=True,
+                http_method="POST",
+                http_url=(
+                    "{{ABRAHAM_PORTAINER_URL}}/api/endpoints/{{ABRAHAM_MACMINI_ENDPOINT_ID}}"
+                    "/docker/images/prune?filters=%7B%22dangling%22%3A%5B%22true%22%5D%7D"
+                ),
+                http_headers='{"X-API-Key": "{{ABRAHAM_PORTAINER_TOKEN}}"}',
                 http_body=None,
             ))
 
