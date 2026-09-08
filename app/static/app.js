@@ -72,6 +72,16 @@ async function loadJobs() {
     renderJobs();
   } catch (e) {
     console.error('Failed to load jobs', e);
+    const grid = document.getElementById('jobs-grid');
+    if (grid && _jobs.length === 0) {
+      grid.innerHTML = `
+        <div class="empty-state" style="grid-column:1/-1;">
+          <div class="empty-icon">⚠️</div>
+          <h3>Failed to load jobs</h3>
+          <p style="color:var(--danger);">${esc(e.message)}</p>
+          <button class="btn btn-ghost btn-sm" onclick="loadJobs()" style="margin-top:10px;">↻ Retry</button>
+        </div>`;
+    }
   }
 }
 

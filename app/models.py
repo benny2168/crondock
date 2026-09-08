@@ -48,8 +48,8 @@ class JobUpdate(BaseModel):
 
 class JobResponse(JobBase):
     id: int
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     last_run_at: Optional[datetime] = None
     last_run_success: Optional[bool] = None
     next_run_at: Optional[datetime] = None
@@ -60,7 +60,7 @@ class JobResponse(JobBase):
 class JobLogResponse(BaseModel):
     id: int
     job_id: int
-    started_at: datetime
+    started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     success: Optional[bool] = None
     exit_code: Optional[int] = None
@@ -83,7 +83,7 @@ class SettingCreate(SettingBase):
 
 class SettingResponse(SettingBase):
     id: int
-    created_at: datetime
-    updated_at: datetime
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
