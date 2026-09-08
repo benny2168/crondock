@@ -65,6 +65,7 @@ class JobLogResponse(BaseModel):
     success: Optional[bool] = None
     exit_code: Optional[int] = None
     output: Optional[str] = None
+    duration_ms: Optional[int] = None
 
     model_config = {"from_attributes": True}
 

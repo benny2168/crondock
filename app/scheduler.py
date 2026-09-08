@@ -1,6 +1,7 @@
 import json
 import logging
 import subprocess
+import time
 from datetime import datetime
 
 import httpx
@@ -26,6 +27,17 @@ def _substitute(text: str, settings: dict) -> str:
     for key, value in settings.items():
         text = text.replace(f"{{{{{key}}}}}", value)
     return text
+
+
+def _format_http_body(text: str) -> str:
+    """Pretty-format JSON bodies if valid JSON, otherwise return text truncated."""
+    if not text:
+        return ""
+    try:
+        parsed = json.loads(text)
+        return json.dumps(parsed, indent=2)
+    except Exception:
+        return text[:4000]
 
 
 # ── Executors ──────────────────────────────────────────────────────────────────
@@ -54,18 +66,60 @@ def _run_http(method: str, url: str, headers_json: str, body: str, settings: dic
     except Exception:
         headers = {}
 
-    try:
-        with httpx.Client(timeout=120, verify=True) as client:
-            resp = client.request(
-                method=(method or "GET").upper(),
-                url=url,
-                headers=headers,
-                content=body_str.encode() if body_str else None,
-            )
-        output = f"HTTP {resp.status_code}\n{resp.text[:4000]}"
-        return output, 200 <= resp.status_code < 300, resp.status_code
-    except Exception as exc:
-        return str(exc), False, -1
+    timeout_val = 300.0
+    if "HTTP_TIMEOUT" in settings:
+        try:
+            timeout_val = float(settings["HTTP_TIMEOUT"])
+        except ValueError:
+            pass
+
+    max_attempts = 3
+    retry_delay = 10.0
+    attempts_log = []
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with httpx.Client(timeout=timeout_val, verify=True) as client:
+                resp = client.request(
+                    method=(method or "GET").upper(),
+                    url=url,
+                    headers=headers,
+                    content=body_str.encode() if body_str else None,
+                )
+
+            formatted_body = _format_http_body(resp.text)
+            output = f"HTTP {resp.status_code}\n{formatted_body}".strip()
+            is_success = 200 <= resp.status_code < 300
+
+            # Retry on transient server error codes if attempts remain
+            if resp.status_code in (502, 503, 504, 409) and attempt < max_attempts:
+                attempts_log.append(
+                    f"Attempt {attempt}: HTTP {resp.status_code} ({resp.text[:120].strip()}). Retrying in {int(retry_delay)}s..."
+                )
+                time.sleep(retry_delay)
+                retry_delay *= 2
+                continue
+
+            if attempts_log:
+                output = "\n".join(attempts_log) + "\n\n" + output
+            return output, is_success, resp.status_code
+
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.NetworkError) as exc:
+            err_msg = "Request timed out" if isinstance(exc, httpx.TimeoutException) else str(exc)
+            if attempt < max_attempts:
+                attempts_log.append(
+                    f"Attempt {attempt}: {err_msg}. Retrying in {int(retry_delay)}s..."
+                )
+                time.sleep(retry_delay)
+                retry_delay *= 2
+                continue
+            else:
+                attempts_log.append(
+                    f"Attempt {attempt}: {err_msg} (failed after {max_attempts} attempts)"
+                )
+                return "\n".join(attempts_log), False, -1
+        except Exception as exc:
+            return str(exc), False, -1
 
 
 # ── Core job runner ────────────────────────────────────────────────────────────

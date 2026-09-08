@@ -68,6 +68,12 @@ class JobLog(Base):
 
     job = relationship("Job", back_populates="logs")
 
+    @property
+    def duration_ms(self):
+        if self.started_at and self.finished_at:
+            return int((self.finished_at - self.started_at).total_seconds() * 1000)
+        return None
+
 
 def init_db():
     os.makedirs(DATA_DIR, exist_ok=True)
@@ -96,7 +102,7 @@ def seed_defaults():
                 name="Docker Cleanup — Abraham",
                 description="Remove unused Docker images from Abraham Synology NAS via Portainer API",
                 type="http",
-                schedule="0 3 * * *",
+                schedule="30 3 * * *",
                 enabled=True,
                 http_method="POST",
                 http_url=(

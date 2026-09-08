@@ -335,12 +335,30 @@ function logEntry(log) {
       ? `<span class="badge badge-success">✓ Success</span>`
       : `<span class="badge badge-fail">✕ Failed</span>`;
 
-  const duration = log.finished_at
-    ? ` · ${durationMs(log.started_at, log.finished_at)}`
+  let durText = '';
+  if (log.duration_ms != null) {
+    durText = log.duration_ms < 1000 ? `${log.duration_ms}ms` : log.duration_ms < 60000 ? `${(log.duration_ms/1000).toFixed(1)}s` : `${Math.floor(log.duration_ms/60000)}m ${Math.floor((log.duration_ms%60000)/1000)}s`;
+  } else if (log.started_at && log.finished_at) {
+    durText = durationMs(log.started_at, log.finished_at);
+  }
+
+  let codeText = '';
+  if (log.exit_code !== null) {
+    if (log.exit_code === -1) {
+      codeText = 'Timeout / Error';
+    } else if (log.exit_code >= 200 && log.exit_code < 600) {
+      codeText = `HTTP ${log.exit_code}`;
+    } else {
+      codeText = `Exit ${log.exit_code}`;
+    }
+  }
+
+  const codeLabel = codeText
+    ? `<span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);margin-left:auto;padding-right:8px;">${codeText}</span>`
     : '';
 
-  const codeLabel = log.exit_code !== null
-    ? `<span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);margin-left:auto;padding-right:10px;">code ${log.exit_code}</span>`
+  const durationHtml = durText
+    ? `<span class="log-duration" style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--muted);${codeText ? '' : 'margin-left:auto;'}">⏱ ${durText}</span>`
     : '';
 
   const output = log.output ? esc(log.output) : '(no output)';
@@ -352,7 +370,7 @@ function logEntry(log) {
         ${statusBadge}
         <span class="log-timestamp">${formatDate(log.started_at)}</span>
         ${codeLabel}
-        <span class="log-duration">${duration}</span>
+        ${durationHtml}
       </div>
       <pre class="log-body hidden" id="${logId}">${output}</pre>
     </div>`;
