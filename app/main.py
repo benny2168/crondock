@@ -18,10 +18,11 @@ from auth import (
     clear_session, create_session, decode_jwt_payload,
     exchange_code, get_oidc_config,
     get_session, get_state_data, set_state_cookie,
+    verify_api_key,
 )
 
 LOGIN_PROVIDER_NAME = os.getenv("LOGIN_PROVIDER_NAME", "Authentik SSO" if AUTH_PROVIDER == "oidc" else "Synology SSO")
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.3.0"
 from database import Job, JobLog, SessionLocal, Setting, init_db, seed_defaults
 from models import (
     JobCreate, JobLogResponse, JobResponse, JobUpdate,
@@ -48,6 +49,13 @@ class AuthMiddleware(BaseHTTPMiddleware):
         # Allow public paths
         if path in _PUBLIC or any(path.startswith(p) for p in _PUBLIC_PREFIXES):
             return await call_next(request)
+
+        # Check API key header for programmatic /api/* access
+        if path.startswith("/api"):
+            api_key = request.headers.get("X-API-Key")
+            if api_key and verify_api_key(api_key):
+                request.state.user = {"api": True, "name": "api-token"}
+                return await call_next(request)
 
         user = get_session(request)
 

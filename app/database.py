@@ -93,6 +93,7 @@ def seed_defaults():
             ("MTCD_PORTAINER_URL",              "https://docker.server.mtcd.org",                       "MTCD Portainer base URL",              False),
             ("MTCD_PORTAINER_TOKEN",            "ptr_caKh16OVXC+3G4shu9s7TXtumDZY04R6wwaOYkq+Pls=",   "MTCD Portainer API token",              True),
             ("MTCD_PORTAINER_ENDPOINT_ID",      "2",                                                    "MTCD Synology Docker endpoint ID",     False),
+            ("API_KEY",                         "",                                                     "API token for programmatic job/setting management via X-API-Key header. Set this to a random 32+ character string; leave empty to disable API auth.", True),
         ]
         for key, value, desc, secret in defaults:
             if not db.query(Setting).filter(Setting.key == key).first():

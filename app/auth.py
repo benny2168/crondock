@@ -160,3 +160,30 @@ async def exchange_code(code: str) -> dict:
         raise ValueError(f"SSO error: {data.get('error')} — {data.get('error_description', '')}")
     return data
 
+
+# ── API Key Verification ───────────────────────────────────────────────────
+
+def verify_api_key(token: str) -> bool:
+    """Verify an X-API-Key token against the API_KEY setting in the database.
+    Returns False if token is empty, API_KEY setting is empty/missing, or mismatch.
+    Uses constant-time comparison to prevent timing attacks.
+    """
+    if not token or not token.strip():
+        return False
+    try:
+        from database import SessionLocal, Setting
+        db = SessionLocal()
+        try:
+            setting = db.query(Setting).filter(Setting.key == "API_KEY").first()
+            if not setting or not setting.value:
+                return False
+            expected = setting.value.strip()
+            if not expected:
+                return False
+            return secrets.compare_digest(token.strip(), expected)
+        finally:
+            db.close()
+    except Exception as e:
+        _log.warning(f"Failed to verify API key: {e}")
+        return False
+
