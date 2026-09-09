@@ -1,5 +1,16 @@
 # Change Tracker — CronDock
 
+### 2026-09-08 — v1.3.1: Host-Operations Toolset for Shell Jobs
+- **Change**: Added host-operation and remote-sync CLI utilities (`docker-cli`, `sqlite`, `openssh-client`, `rsync`, `tar`) to the CronDock container image to enable shell jobs that interact with host Docker containers and remote hosts (e.g. Vaultwarden hourly backup and remote NAS sync).
+- **Actions**:
+  1. Updated `Dockerfile` runtime packages (`apk add --no-cache curl tzdata bash docker-cli sqlite openssh-client rsync tar`).
+  2. Bumped `APP_VERSION` to `1.3.1` in `app/main.py` and updated UI version subtitle to `v1.3.1` in `app/static/index.html`.
+  3. Built local Docker image `benny2168/crondock:1.3.1` and `benny2168/crondock:latest` targeting `linux/arm64`.
+- **Validation**:
+  - Verified tool presence and executability in image via `which docker sqlite3 rsync ssh tar`.
+  - Verified CLI versions (`docker --version`, `sqlite3 --version`, `rsync --version`, `ssh -V`).
+  - Deploy-first test mode: container runtime verification pending parent orchestrator container recreation with host mounts.
+
 ### 2026-09-08 — v1.3.0: API Token Authentication for Programmatic Access
 - **Change**: Added API token authentication support (`X-API-Key` header) for all `/api/*` endpoints, allowing external scripts, automated workflows, and secondary orchestrators to manage jobs and settings programmatically without requiring interactive Authentik SSO.
 - **Actions**:

@@ -4,8 +4,8 @@ LABEL org.opencontainers.image.title="CronDock"
 LABEL org.opencontainers.image.description="Visual cron job manager with web UI"
 LABEL org.opencontainers.image.source="https://github.com/mtcdtech/crondock"
 
-# Runtime deps (curl available for shell jobs)
-RUN apk add --no-cache curl tzdata bash
+# Runtime deps (curl, docker-cli, sqlite, ssh, rsync, tar for shell jobs)
+RUN apk add --no-cache curl tzdata bash docker-cli sqlite openssh-client rsync tar
 
 WORKDIR /app
 

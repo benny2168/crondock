@@ -1,12 +1,16 @@
 # Notes for Next Session — CronDock
 
-## Immediate Verification (Post-Deploy v1.3.0)
-1. Confirm `/api/health` returns `{"ok": true, "version": "1.3.0"}` at `https://cron.abraham16.com/api/health`.
-2. Verify unauthorized requests to `/api/jobs` return HTTP 401.
-3. Configure `API_KEY` setting value in CronDock Settings UI (`https://cron.abraham16.com`) with random 32+ char secret.
-4. Verify programmatic request with `X-API-Key: <token>` returns 200 on `/api/jobs`.
-5. Migrate Vaultwarden hourly backup job to CronDock via `/api/jobs` and remove legacy launchd job `com.abraham16.vw-backup` on Ben-Mac-Mini.
-6. Monitor automated Docker cleanups at `30 3 * * *`, `35 3 * * *`, `40 3 * * *`, and `45 3 * * *`.
+## Immediate Verification & Follow-on Work (Post-Deploy v1.3.1)
+Parent orchestrator will execute the following steps once v1.3.1 is shipped:
+1. **Container Recreation with Host Mounts**: Recreate CronDock container on Ben-Mac-Mini adding `-v /var/run/docker.sock:/var/run/docker.sock` and `-v /Users/benny2168/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro`.
+2. **Verify Tooling in Production**:
+   - Confirm `/api/health` returns `{"ok": true, "version": "1.3.1"}`.
+   - Run `docker exec crondock which docker sqlite3 rsync ssh tar` to confirm all CLIs resolve.
+3. **Drop Backup Script**: Drop `vw-backup-v2.sh` into `/Users/benny2168/Dockers/crondock/data/scripts/` (accessible as `/data/scripts/vw-backup-v2.sh` inside container).
+4. **Configure Host Verification**: Populate `known_hosts` via `docker exec crondock sh -c "ssh-keyscan 100.91.132.90 >> /root/.ssh/known_hosts"`.
+5. **Create CronDock Job**: Create Vaultwarden hourly backup job via API (`POST /api/jobs`) with schedule `7 * * * *` and command `bash /data/scripts/vw-backup-v2.sh`.
+6. **Trigger and Verify**: Trigger job via `POST /api/jobs/{id}/run` and confirm successful execution and Synology tarball sync.
+7. **Retire Launchd Job**: Disable and delete legacy launchd job `com.abraham16.vw-backup`.
 
 ## Backlog / Planned Items
 - Support optional webhooks / notifications (e.g. Discord, Telegram, NTFY) on job failure.
