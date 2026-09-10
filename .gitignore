@@ -4,3 +4,8 @@ __pycache__/
 *.pyo
 .env
 .DS_Store
+
+# Abraham secrets — never commit
+.env.abraham
+.env.abraham.*
+!.env.abraham.example

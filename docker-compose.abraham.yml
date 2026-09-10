@@ -1,0 +1,47 @@
+services:
+  crondock:
+    image: benny2168/crondock:latest
+    container_name: crondock
+    restart: unless-stopped
+    ports:
+      - "3900:8000"
+    volumes:
+      - /Users/benny2168/Dockers/crondock/data:/data
+      # Docker socket for job control
+      - /var/run/docker.sock:/var/run/docker.sock
+      # SSH keys for remote job execution (Synology, etc.)
+      - /Users/benny2168/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro
+      - /Users/benny2168/.ssh/known_hosts:/root/.ssh/known_hosts:ro
+      # Host backups directory (job logs, tarballs)
+      - /Users/benny2168/Dockers/backups:/host-backups
+      # NPM primary source data — read-only, used by npm-sync-standby.sh
+      - /Users/benny2168/Dockers/nginx-proxy-data:/nginx-proxy-src/data:ro
+      - /Users/benny2168/Dockers/nginx-proxy-letsencrypt:/nginx-proxy-src/letsencrypt:ro
+    environment:
+      - TZ=America/Chicago
+      - DATA_DIR=/data
+      # ── Auth provider (Authentik) ─────────────────────────────────────────
+      - AUTH_PROVIDER=oidc
+      - LOGIN_PROVIDER_NAME=Authentik SSO
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
+      - OIDC_DISCOVERY_URL=https://auth.abraham16.com/application/o/crondock/.well-known/openid-configuration
+      - OIDC_REDIRECT_URI=https://cron.abraham16.com/auth/callback
+      # ── Session ───────────────────────────────────────────────────────────
+      - SESSION_SECRET=${SESSION_SECRET}
+      - SESSION_COOKIE_NAME=crondock_session
+      - SESSION_MAX_AGE_HOURS=24
+      # ── Portainer API (used by warm-standby scripts) ──────────────────────
+      - PORTAINER_URL=${PORTAINER_URL}
+      - PORTAINER_TOKEN=${PORTAINER_TOKEN}
+      - PORTAINER_ENDPOINT_ID=${PORTAINER_ENDPOINT_ID}
+      # ── Standby targets ───────────────────────────────────────────────────
+      - STANDBY_HOST=${STANDBY_HOST}
+      - STANDBY_SSH_USER=${STANDBY_SSH_USER}
+    networks:
+      - default
+      - proxynet
+
+networks:
+  proxynet:
+    external: true
