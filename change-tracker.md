@@ -1,5 +1,35 @@
 # Change Tracker — CronDock
 
+## 2026-09-09 — Abraham fork created (branch `abraham`)
+
+**What:** Forked mtcdtech/crondock to benny2168/crondock. Created `abraham`
+branch as permanent divergence for Abraham-network-specific config and
+warm-standby automation.
+
+**Why:** Abraham deployment is growing responsibilities (warm-standby sync
+to Synology) that don't belong in the shared upstream. Fork lets Abraham
+diverge without polluting mtcdtech/main; upstream fixes still pullable via
+`git fetch mtcdtech && git merge mtcdtech/main`.
+
+**Added:**
+- `docker-compose.abraham.yml` — env-var-driven compose with `.env.abraham`
+- `.env.abraham.example` — template of required env vars
+- `scripts/abraham/vw-restore-standby.sh` — hourly VW restore
+- `scripts/abraham/npm-sync-standby.sh` — hourly NPM config sync
+- `docs/abraham/warm-standby.md` — topology, failover, rollback
+- `docs/abraham/deployment.md` — Abraham deployment guide
+- `.gitignore` — added `.env.abraham` block
+
+**Not changed:**
+- `docker-compose.yml` — still the active Abraham config (until deploy of
+  new compose file, tracked in notes-next-session.md)
+- `app/`, `Dockerfile`, `requirements.txt` — track upstream unchanged
+- `docker-compose.mtcd.yml` — MTCD config, untouched
+
+**Version:** No app version bump (this is repo restructuring).
+**Deployed:** No — Phase 2 handoff work (recreate container with new mounts,
+create CronDock jobs #7 and #8) is separate. See notes-next-session.md.
+
 ### 2026-09-08 — v1.3.1: Host-Operations Toolset for Shell Jobs
 - **Change**: Added host-operation and remote-sync CLI utilities (`docker-cli`, `sqlite`, `openssh-client`, `rsync`, `tar`) to the CronDock container image to enable shell jobs that interact with host Docker containers and remote hosts (e.g. Vaultwarden hourly backup and remote NAS sync).
 - **Actions**:
