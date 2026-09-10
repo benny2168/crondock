@@ -1,5 +1,19 @@
 # Change Tracker — CronDock
 
+### 2026-09-09 — Warm Standby HA Sync Automation Deployed (Vaultwarden + NPM)
+- **Change**: Configured and deployed automated hourly warm-standby synchronization and restoration for Vaultwarden and Nginx Proxy Manager (NPM) from Ben-Mac-Mini to Abraham Synology NAS (`192.168.1.121` / `100.91.132.90`) to provide instant disaster recovery in case OrbStack/Mac-Mini goes down.
+- **Actions**:
+  1. Recreated `crondock` container on Mac Mini with read-only source mounts for `/Users/benny2168/Dockers/nginx-proxy-data:/nginx-proxy-src/data:ro` and `/Users/benny2168/Dockers/nginx-proxy-letsencrypt:/nginx-proxy-src/letsencrypt:ro`.
+  2. Created `/data/scripts/vw-restore-standby.sh` inside CronDock data volume: automates hourly extraction of the latest Vaultwarden backup archive on Synology, atomic directory swap to `/volume1/docker/vaultwarden-standby/data`, container restart via Portainer API, and health verification.
+  3. Created `/data/scripts/npm-sync-standby.sh` inside CronDock data volume: automates hourly rsync of NPM configuration, SQLite database, and Let's Encrypt certificates to `/volume1/docker/nginx-proxy-standby/`, followed by Nginx reload via Portainer container exec API.
+  4. Created CronDock Job #7 (`Vaultwarden Standby Restore` at `17 * * * *`) and Job #8 (`NPM Config Sync to Synology` at `22 * * * *`) via CronDock REST API.
+  5. Updated `docker-compose.yml` volumes to persist all host mounts.
+- **Validation**:
+  - `vw-restore-standby.sh` triggered and verified end-to-end; restored 3.02MB database; Synology endpoint `http://192.168.1.121:5151/alive` returned HTTP 200.
+  - `npm-sync-standby.sh` triggered and verified end-to-end; 204.8KB database and SSL live certificates synced; Synology UI `http://192.168.1.121:8081/` returned HTTP 200.
+  - All 7 active CronDock jobs verified operational.
+
+
 ## 2026-09-09 — Abraham fork created (branch `abraham`)
 
 **What:** Forked mtcdtech/crondock to benny2168/crondock. Created `abraham`

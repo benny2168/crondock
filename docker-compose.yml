@@ -8,6 +8,12 @@ services:
       - "3900:8000"
     volumes:
       - /Users/benny2168/Dockers/crondock/data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /Users/benny2168/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro
+      - /Users/benny2168/.ssh/known_hosts:/root/.ssh/known_hosts:ro
+      - /Users/benny2168/Dockers/backups:/host-backups
+      - /Users/benny2168/Dockers/nginx-proxy-data:/nginx-proxy-src/data:ro
+      - /Users/benny2168/Dockers/nginx-proxy-letsencrypt:/nginx-proxy-src/letsencrypt:ro
     environment:
       - TZ=America/Chicago
       - DATA_DIR=/data
