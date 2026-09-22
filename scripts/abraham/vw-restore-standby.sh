@@ -11,7 +11,8 @@ PORTAINER_URL="${PORTAINER_URL:-https://docker.abraham16.com}"
 SYNO_HOST="ben@100.91.132.90"
 SSH_CMD="ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 
-exec >>"$LOG" 2>&1
+# Stream output to persistent log on disk and stdout/stderr so CronDock captures execution logs
+exec 1> >(tee -a "$LOG") 2>&1
 echo "[$STAMP] === vw-restore-standby start ==="
 
 # 1. Find latest backup on Synology
@@ -41,17 +42,16 @@ $SSH_CMD "$SYNO_HOST" "
   rm -rf /volume1/docker/vaultwarden-standby/restore-tmp
 "
 
-# 4. Restart container via Portainer API to reload database
-echo "[$STAMP] Restarting vaultwarden-standby via Portainer API..."
-curl -sS -m 60 -X POST -H "X-API-Key: $PORTAINER_TOK" \
-  "$PORTAINER_URL/api/endpoints/5/docker/containers/vaultwarden-standby/restart?t=2" > /dev/null || \
-curl -sS -m 60 -X POST -H "X-API-Key: $PORTAINER_TOK" \
-  "http://portainer:9000/api/endpoints/5/docker/containers/vaultwarden-standby/restart?t=2" > /dev/null || true
+# 4. Restart container to reload database
+echo "[$STAMP] Restarting vaultwarden-standby container..."
+$SSH_CMD "$SYNO_HOST" "sudo /usr/local/bin/docker restart -t 15 vaultwarden-standby" || \
+curl -sS -m 30 -X POST -H "X-API-Key: $PORTAINER_TOK" \
+  "$PORTAINER_URL/api/endpoints/5/docker/containers/vaultwarden-standby/restart?t=15" > /dev/null || true
 
-# 5. Verify health (poll up to 8 times for startup)
+# 5. Verify health (poll up to 15 times for startup)
 echo "[$STAMP] Polling health check..."
 HTTP_CODE="000"
-for i in {1..8}; do
+for i in {1..15}; do
   sleep 3
   HTTP_CODE=$(curl -sS -m 5 -o /dev/null -w "%{http_code}" http://192.168.1.121:5151/alive || echo "000")
   if [ "$HTTP_CODE" = "200" ]; then

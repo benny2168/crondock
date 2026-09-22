@@ -1,5 +1,28 @@
 # Change Tracker — CronDock
 
+### 2026-09-21 — v1.3.4: Vaultwarden Standby Restore & CronDock Log Output Streaming
+- **Issues**:
+  1. Vaultwarden Standby Restore (Job #7) showed failed in CronDock.
+  2. All execution log history in CronDock UI displayed `(no output)` when clicking into job runs.
+- **Root Causes**:
+  1. **`(no output)` in Job Logs**: Both `vw-restore-standby.sh` and `npm-sync-standby.sh` used `exec >>"$LOG" 2>&1`, which redirected all stdout and stderr exclusively into `/host-backups/.../*.log`. As a result, CronDock's subprocess runner captured an empty string (`""`), causing the UI to display `(no output)` across all historic runs in `job_logs`.
+  2. **Vaultwarden Standby Failures & Restarts**:
+     - Synology's ContainerManager Docker daemon had encountered bridge network corruption (`heartbeat_default`/`heartbeat_net`), causing dockerd socket communication timeouts.
+     - The container restart command used `curl ... /restart?t=2` via the external Portainer API. Under Synology BTRFS I/O load, Vaultwarden required ~13s to cleanly flush SQLite and exit. The 2-second timeout (`t=2`) triggered a SIGKILL, and Docker 24.0.2 on Synology flagged the container as manually stopped (`ShouldRestart failed ... error="restart canceled" hasBeenManuallyStopped=true`), leaving the container in `Exited` state.
+     - With the container stopped, the 8-iteration health check loop timed out and logged `ERROR: Health check failed with status 000`.
+  3. **NPM Standby Configuration**: Syncing configurations from Mac Mini introduced `host.docker.internal` (used for AGStack proxy host 29 on Mac Mini), which failed DNS resolution on Synology Linux and caused Nginx startup failures.
+- **Fixes**:
+  1. Updated logging redirection in `vw-restore-standby.sh` and `npm-sync-standby.sh` to `exec 1> >(tee -a "$LOG") 2>&1` so execution output streams simultaneously to disk and stdout/stderr for CronDock's database capture.
+  2. Recovered Synology `pkg-ContainerManager-dockerd.service` and recreated `vaultwarden-standby` on standard bridge network (`-p 5151:80 -p 3012:3012`).
+  3. Replaced fragile `t=2` Portainer restart with direct SSH host command `$SSH_CMD "$SYNO_HOST" "sudo /usr/local/bin/docker restart -t 15 ..."` (with Portainer fallback), and expanded health check polling to 15 iterations (45s).
+  4. Added upstream rewrite rule `sed -i "s/host\.docker\.internal/192.168.1.120/g"` in `npm-sync-standby.sh` to rewrite Mac Mini container hosts to the LAN IP on Synology.
+  5. Synchronized scripts to live CronDock data directory `/Users/benny2168/Dockers/crondock/data/scripts/`.
+- **Validation**:
+  - Triggered Job #7 (`vw-restore-standby.sh`) via CronDock API: Job 1010 completed with exit code 0 (`success=1`), output 714 bytes streamed, and health check returned HTTP 200 (`"2026-09-22T04:52:13.309910"`).
+  - Triggered Job #8 (`npm-sync-standby.sh`) via CronDock API: Job 1011 completed with exit code 0 (`success=1`), output 1738 bytes streamed.
+  - All 7 active CronDock jobs verified enabled and `last_run_success = 1`.
+
+
 ### 2026-09-21 — v1.3.3: SQLite Concurrency Hardening (WAL Mode) & Mac Mini Tasks Re-enabled
 - **Issue**: Attempting to re-enable Job #4 ("Docker Containers Cleanup — Mac Mini") or Job #5 ("Docker Images Cleanup — Mac Mini") from the UI or API failed with `500 Internal Server Error` caused by `sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) database is locked` on `UPDATE jobs SET enabled=?, updated_at=? WHERE jobs.id = ?`.
 - **Root Cause**: The SQLite database was operating in default `delete` rollback-journal mode on a host Docker bind mount without a busy timeout. Concurrent reads from `AuthMiddleware` / API token checks and background scheduler sessions locked the entire file, causing writes to timeout after SQLite's default 5-second window.

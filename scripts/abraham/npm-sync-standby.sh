@@ -11,7 +11,8 @@ PORTAINER_URL="${PORTAINER_URL:-https://docker.abraham16.com}"
 SYNO_HOST="ben@100.91.132.90"
 SSH_CMD="ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 
-exec >>"$LOG" 2>&1
+# Stream output to persistent log on disk and stdout/stderr so CronDock captures execution logs
+exec 1> >(tee -a "$LOG") 2>&1
 echo "[$STAMP] === npm-sync-standby start ==="
 
 SRC_DATA="/nginx-proxy-src/data"
@@ -49,22 +50,22 @@ $SSH_CMD "$SYNO_HOST" '
 
   # Rewrite Nginx proxy configurations
   sed -i "s/192\.168\.1\.120/192.168.1.121/g" /volume1/docker/nginx-proxy-standby/data/nginx/proxy_host/*.conf
+  sed -i "s/host\.docker\.internal/192.168.1.120/g" /volume1/docker/nginx-proxy-standby/data/nginx/proxy_host/*.conf
 
   # Standby NPM admin UI runs on port 8081 on Synology
   sed -i "s/set \$port           81;/set \$port           8081;/g" /volume1/docker/nginx-proxy-standby/data/nginx/proxy_host/27.conf
 '
 
-# 4. Restart standby container via Portainer API so Node.js backend re-reads SQLite database
+# 4. Restart standby container so Node.js backend re-reads SQLite database
 echo "[$STAMP] Restarting standby NPM container..."
+$SSH_CMD "$SYNO_HOST" "sudo /usr/local/bin/docker restart -t 15 nginx-proxy-standby" || \
 curl -sS -m 30 -X POST -H "X-API-Key: $PORTAINER_TOK" \
-  "$PORTAINER_URL/api/endpoints/5/docker/containers/nginx-proxy-standby/restart?t=2" > /dev/null || \
-curl -sS -m 30 -X POST -H "X-API-Key: $PORTAINER_TOK" \
-  "http://portainer:9000/api/endpoints/5/docker/containers/nginx-proxy-standby/restart?t=2" > /dev/null || true
+  "$PORTAINER_URL/api/endpoints/5/docker/containers/nginx-proxy-standby/restart?t=15" > /dev/null || true
 
 # 5. Wait and verify standby port 8081 responds
 echo "[$STAMP] Polling NPM standby UI..."
 HTTP_CODE="000"
-for i in {1..8}; do
+for i in {1..15}; do
   sleep 3
   HTTP_CODE=$(curl -sS -m 5 -o /dev/null -w "%{http_code}" http://192.168.1.121:8081/ || echo "000")
   if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "302" ]; then

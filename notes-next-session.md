@@ -1,16 +1,18 @@
 # Notes for Next Session — CronDock
 
 ## Recently Completed (2026-09-21)
-SQLite Concurrency Hardening (WAL Mode) & Mac Mini Tasks Re-enabled (CronDock v1.3.3):
-- **SQLite Concurrency Hardening**:
-  - Configured Write-Ahead Logging (`PRAGMA journal_mode=WAL`), `PRAGMA synchronous=NORMAL`, and `PRAGMA busy_timeout=30000` via SQLAlchemy event listeners and `create_engine(connect_args={"timeout": 30})`.
-  - Completely resolved `database is locked` OperationalErrors during job update / toggle requests caused by concurrent `AuthMiddleware` / API token lookups and scheduler threads.
-- **Mac Mini Docker Cleanups Re-enabled & Verified**:
-  - Job #4 (`Docker Containers Cleanup — Mac Mini` at `40 3 * * *`): Re-enabled; manual test run completed in 68ms (HTTP 200).
-  - Job #5 (`Docker Images Cleanup — Mac Mini` at `45 3 * * *`): Re-enabled; manual test run completed (HTTP 200).
-- **CronDock Container Deployed**:
-  - Built and deployed `benny2168/crondock:1.3.3`.
-  - Health check on `https://cron.abraham16.com/api/health` confirmed live with version `1.3.3`.
+Vaultwarden Standby Restore & CronDock Log Output Streaming:
+- **CronDock Log Streaming**:
+  - Replaced `exec >> "$LOG" 2>&1` with `exec 1> >(tee -a "$LOG") 2>&1` in `vw-restore-standby.sh` and `npm-sync-standby.sh` so execution output streams simultaneously to disk and stdout/stderr for CronDock's database capture, permanently resolving `(no output)` across job executions.
+- **Vaultwarden Standby Restore (Job #7)**:
+  - Recreated `vaultwarden-standby` on standard bridge network on Synology.
+  - Replaced fragile `t=2` Portainer restart with direct SSH host command (`docker restart -t 15`), and increased health check polling to 15 iterations (45s).
+  - Verified run: Job 1010 completed with exit code 0 (`success=1`), health check returned HTTP 200, and full log stream saved.
+- **NPM Standby Config Sync (Job #8)**:
+  - Added `host.docker.internal` -> `192.168.1.120` rewrite in `npm-sync-standby.sh` so Mac Mini proxy host configs don't crash Nginx on Synology.
+  - Replaced restart mechanism with direct SSH restart.
+  - Verified run: Job 1011 completed with exit code 0 (`success=1`) and full log stream saved.
+- **All 7 Jobs Green**: Every job in CronDock is enabled and showing `last_run_success = 1`.
 
 ## Immediate Backlog
 - **Uploadable scripts as a first-class UI feature**: Add UI section under Settings or Jobs for uploading, editing, listing, and deleting shell scripts stored in `/data/scripts/`.
