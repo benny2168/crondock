@@ -1,77 +1,68 @@
 #!/bin/bash
-# Vaultwarden warm-standby restore.
-# Invoked hourly by CronDock job #7 (schedule: "17 * * * *").
-#
-# 1. Find newest vw-*.tgz backup on Abraham Synology (produced by job #6)
-# 2. Extract to /volume1/docker/vaultwarden-standby/data.new
-# 3. Stop vaultwarden-standby container via Portainer API
-# 4. Atomic swap: data -> data.old, data.new -> data
-# 5. Start container
-# 6. Delete data.old, verify /alive endpoint
+# Vaultwarden standby restore script — runs inside CronDock container
 set -euo pipefail
 
-# ── Config from env ─────────────────────────────────────────────────────────
-: "${PORTAINER_URL:?PORTAINER_URL not set}"
-: "${PORTAINER_TOKEN:?PORTAINER_TOKEN not set}"
-: "${PORTAINER_ENDPOINT_ID:?PORTAINER_ENDPOINT_ID not set}"
-: "${STANDBY_HOST:?STANDBY_HOST not set}"
-: "${STANDBY_SSH_USER:?STANDBY_SSH_USER not set}"
-
-# ── Constants ───────────────────────────────────────────────────────────────
-CONTAINER=vaultwarden-standby
-DATA_DIR=/volume1/docker/vaultwarden-standby/data
-BACKUP_GLOB=/volume1/docker/vaultwarden/backups/vw-*.tgz
-HEALTH_URL=http://192.168.1.121:5151/alive
-LOG_DIR=/host-backups/vaultwarden
-LOG=$LOG_DIR/restore.log
-SSH="ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o BatchMode=yes ${STANDBY_SSH_USER}@${STANDBY_HOST}"
-
-mkdir -p "$LOG_DIR"
-exec >>"$LOG" 2>&1
-
 STAMP="$(date '+%Y-%m-%d %H:%M:%S')"
-echo ""
+LOG_DIR="/host-backups/vaultwarden"
+mkdir -p "$LOG_DIR"
+LOG="$LOG_DIR/restore.log"
+PORTAINER_TOK="ptr_LAYVFvw5+DscmC2s2QsM+5aeO6iXGYcR4+KwjH7f/eU="
+PORTAINER_URL="${PORTAINER_URL:-https://docker.abraham16.com}"
+SYNO_HOST="ben@100.91.132.90"
+SSH_CMD="ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
+
+exec >>"$LOG" 2>&1
 echo "[$STAMP] === vw-restore-standby start ==="
 
-# 1. Find latest backup
-LATEST=$($SSH "ls -t $BACKUP_GLOB 2>/dev/null | head -1")
+# 1. Find latest backup on Synology
+LATEST=$($SSH_CMD "$SYNO_HOST" "ls -t /volume1/docker/vaultwarden/backups/vw-*.tgz 2>/dev/null | head -1")
 if [ -z "$LATEST" ]; then
-  echo "[$STAMP] ERROR: no backup tarballs found on $STANDBY_HOST"
+  echo "[$STAMP] ERROR: no backups found on Synology"
   exit 1
 fi
 echo "[$STAMP] Latest backup: $LATEST"
 
-# 2. Extract to .new
-$SSH "rm -rf ${DATA_DIR}.new && mkdir -p ${DATA_DIR}.new && cd ${DATA_DIR}.new && tar -xzf '$LATEST' --strip-components=1 && test -s db.sqlite3"
-echo "[$STAMP] Extracted to ${DATA_DIR}.new"
+# 2. Extract into staging directory on Synology (restore-tmp is owned by ben)
+echo "[$STAMP] Extracting tarball on Synology to restore-tmp..."
+$SSH_CMD "$SYNO_HOST" "
+  rm -rf /volume1/docker/vaultwarden-standby/restore-tmp && \
+  mkdir -p /volume1/docker/vaultwarden-standby/restore-tmp && \
+  cd /volume1/docker/vaultwarden-standby/restore-tmp && \
+  tar -xzf '$LATEST' db.sqlite3 && \
+  tar -xzf '$LATEST' data-files.tgz -O | tar -xz && \
+  test -s db.sqlite3
+"
 
-# 3. Stop container via Portainer
-echo "[$STAMP] Stopping $CONTAINER..."
-curl -sS -m 30 -X POST -H "X-API-Key: $PORTAINER_TOKEN" \
-  "${PORTAINER_URL}/api/endpoints/${PORTAINER_ENDPOINT_ID}/docker/containers/${CONTAINER}/stop?t=10" \
-  > /dev/null || true
+# 3. Synchronize staged files into data/ (excluding root-owned runtime dirs icon_cache and tmp)
+echo "[$STAMP] Synchronizing data directory on Synology..."
+$SSH_CMD "$SYNO_HOST" "
+  rsync -a --exclude='icon_cache' --exclude='tmp' /volume1/docker/vaultwarden-standby/restore-tmp/ /volume1/docker/vaultwarden-standby/data/ && \
+  rm -f /volume1/docker/vaultwarden-standby/data/db.sqlite3-wal /volume1/docker/vaultwarden-standby/data/db.sqlite3-shm && \
+  rm -rf /volume1/docker/vaultwarden-standby/restore-tmp
+"
 
-# 4. Atomic swap
-$SSH "cd $(dirname $DATA_DIR) && rm -rf $(basename $DATA_DIR).old && ([ -d $(basename $DATA_DIR) ] && mv $(basename $DATA_DIR) $(basename $DATA_DIR).old || true) && mv $(basename $DATA_DIR).new $(basename $DATA_DIR)"
-echo "[$STAMP] Swapped directories"
+# 4. Restart container via Portainer API to reload database
+echo "[$STAMP] Restarting vaultwarden-standby via Portainer API..."
+curl -sS -m 60 -X POST -H "X-API-Key: $PORTAINER_TOK" \
+  "$PORTAINER_URL/api/endpoints/5/docker/containers/vaultwarden-standby/restart?t=2" > /dev/null || \
+curl -sS -m 60 -X POST -H "X-API-Key: $PORTAINER_TOK" \
+  "http://portainer:9000/api/endpoints/5/docker/containers/vaultwarden-standby/restart?t=2" > /dev/null || true
 
-# 5. Start container
-echo "[$STAMP] Starting $CONTAINER..."
-curl -sS -m 30 -X POST -H "X-API-Key: $PORTAINER_TOKEN" \
-  "${PORTAINER_URL}/api/endpoints/${PORTAINER_ENDPOINT_ID}/docker/containers/${CONTAINER}/start" \
-  > /dev/null
+# 5. Verify health (poll up to 8 times for startup)
+echo "[$STAMP] Polling health check..."
+HTTP_CODE="000"
+for i in {1..8}; do
+  sleep 3
+  HTTP_CODE=$(curl -sS -m 5 -o /dev/null -w "%{http_code}" http://192.168.1.121:5151/alive || echo "000")
+  if [ "$HTTP_CODE" = "200" ]; then
+    break
+  fi
+done
 
-# 6. Cleanup + verify
-sleep 3
-$SSH "rm -rf ${DATA_DIR}.old"
-
-sleep 5
-CODE=$(curl -sS -m 5 -o /dev/null -w "%{http_code}" "$HEALTH_URL" || echo "000")
-if [ "$CODE" = "200" ]; then
-  echo "[$STAMP] Health check OK (HTTP $CODE)"
-else
-  echo "[$STAMP] WARNING: health check returned HTTP $CODE"
+echo "[$STAMP] Health check HTTP status: $HTTP_CODE"
+if [ "$HTTP_CODE" != "200" ]; then
+  echo "[$STAMP] ERROR: Health check failed with status $HTTP_CODE"
   exit 1
 fi
 
-echo "[$STAMP] === vw-restore-standby end ==="
+echo "[$STAMP] === vw-restore-standby complete (healthy) ==="

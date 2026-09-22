@@ -1,5 +1,23 @@
 # Change Tracker — CronDock
 
+### 2026-09-21 — v1.3.2: Standby Sync & Restore Resiliency Fixes (Vaultwarden + NPM)
+- **Change**: Resolved failure states in automated hourly standby restore for Vaultwarden (Job #7) and config sync for Nginx Proxy Manager (Job #8). Bumped CronDock to `v1.3.2`.
+- **Root Causes & Fixes**:
+  1. **Job #7 (Vaultwarden Standby Restore)**:
+     - *Issue*: Atomic directory rename (`mv data data.old`) failed on Synology because `icon_cache/` was created by the Docker container with `root:root` ownership and `700` permissions, which the non-root SSH user `ben` could not move or delete (`rm: cannot remove ... Permission denied`). Subsequent runs tried to move `data.new` into an existing `data/` directory, failing with `Directory not empty`.
+     - *Fix*: Rewrote `scripts/abraham/vw-restore-standby.sh` to extract the archive to a staging directory (`restore-tmp` owned by `ben`), sync files non-destructively into `/volume1/docker/vaultwarden-standby/data/` using `rsync -a --exclude='icon_cache' --exclude='tmp'`, delete stale WAL/SHM locks, and clean up staging.
+     - *Container Restart*: Switched container restart from separate stop/start to Portainer API `POST /containers/{id}/restart?t=2` (avoids Docker 24+ 400 Bad Request error when body is passed to `/start`).
+  2. **Job #8 (NPM Standby Config Sync)**:
+     - *Issue*: Script failed with `curl: (7) Failed to connect to 127.0.0.1:8999` because port 8999 was an OrbStack host port on Mac Mini, not exposed or accessible inside the container network namespace.
+     - *Fix*: Updated `scripts/abraham/npm-sync-standby.sh` to target `$PORTAINER_URL` (`https://docker.abraham16.com`), with fallback to `http://portainer:9000` (Docker internal bridge DNS).
+  3. **Mac Mini Dual-Interface Routing Conflict**:
+     - *Issue*: Mac Mini had both `en0` (10GbE Ethernet) and `en1` (Wi-Fi) connected to the same subnet (`192.168.1.0/24`). macOS kernel routing flagged `192.168.1.121` on `en1` as blackholed (`!`), causing intermittent `No route to host` errors when communicating with Synology.
+     - *Fix*: Disabled Wi-Fi interface via `networksetup -setairportpower en1 off`.
+- **Validation**:
+  - `vw-restore-standby.sh` ran inside CronDock container and exited with code 0 (`vw-restore-standby complete (healthy)`). Synology endpoint `http://192.168.1.121:5151/alive` returned HTTP 200.
+  - `npm-sync-standby.sh` ran inside CronDock container and exited with code 0 (`npm-sync-standby complete (healthy)`). Synology endpoint `http://192.168.1.121:8081/` returned HTTP 200.
+  - `crondock:1.3.2` container built, deployed, and verified: `https://cron.abraham16.com/api/health` returns `{"ok":true,"version":"1.3.2"}`.
+
 ### 2026-09-09 — Warm Standby HA Sync Automation Deployed (Vaultwarden + NPM)
 - **Change**: Configured and deployed automated hourly warm-standby synchronization and restoration for Vaultwarden and Nginx Proxy Manager (NPM) from Ben-Mac-Mini to Abraham Synology NAS (`192.168.1.121` / `100.91.132.90`) to provide instant disaster recovery in case OrbStack/Mac-Mini goes down.
 - **Actions**:
