@@ -1,5 +1,19 @@
 # Change Tracker — CronDock
 
+### 2026-09-21 — v1.3.3: SQLite Concurrency Hardening (WAL Mode) & Mac Mini Tasks Re-enabled
+- **Issue**: Attempting to re-enable Job #4 ("Docker Containers Cleanup — Mac Mini") or Job #5 ("Docker Images Cleanup — Mac Mini") from the UI or API failed with `500 Internal Server Error` caused by `sqlalchemy.exc.OperationalError: (sqlite3.OperationalError) database is locked` on `UPDATE jobs SET enabled=?, updated_at=? WHERE jobs.id = ?`.
+- **Root Cause**: The SQLite database was operating in default `delete` rollback-journal mode on a host Docker bind mount without a busy timeout. Concurrent reads from `AuthMiddleware` / API token checks and background scheduler sessions locked the entire file, causing writes to timeout after SQLite's default 5-second window.
+- **Fix**:
+  1. Updated `app/database.py` with `connect_args={"check_same_thread": False, "timeout": 30}`.
+  2. Added SQLAlchemy `connect` event listener to enforce `PRAGMA journal_mode=WAL`, `PRAGMA synchronous=NORMAL`, and `PRAGMA busy_timeout=30000`.
+  3. Rebuilt container `benny2168/crondock:1.3.3` and deployed.
+  4. Both Mac Mini tasks (Job #4 and Job #5) were re-enabled. Manual test runs verified successful HTTP 200 execution against Portainer Mac Mini Endpoint 3.
+- **Validation**:
+  - `PUT /api/jobs/4` and `PUT /api/jobs/5` toggle sub-20ms without lock errors.
+  - Test run of Job #4 returned HTTP 200 in 68ms.
+  - Test run of Job #5 returned HTTP 200.
+  - Health check `https://cron.abraham16.com/api/health` returns `{"ok":true,"version":"1.3.3"}`.
+
 ### 2026-09-21 — v1.3.2: Standby Sync & Restore Resiliency Fixes (Vaultwarden + NPM)
 - **Change**: Resolved failure states in automated hourly standby restore for Vaultwarden (Job #7) and config sync for Nginx Proxy Manager (Job #8). Bumped CronDock to `v1.3.2`.
 - **Root Causes & Fixes**:
