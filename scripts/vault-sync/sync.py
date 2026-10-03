@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """
-Vaultwarden Multi-Instance Sync Bridge (MTCD <-> Abraham)
+Vaultwarden Multi-Instance Dual-Channel Sync Bridge (MTCD <-> Abraham)
 Preserves TOTP (2FA seeds) and Passkeys (FIDO2 credentials).
+
+Channels:
+  Channel 1: MTCD ('Sync to Abraham')  <---> Abraham ('Sync from MTCD')
+  Channel 2: Abraham ('Sync to MTCD')  <---> MTCD ('Sync from Abraham')
 
 Runs non-interactively using the Bitwarden CLI (bw) with separate
 data directories for session and server isolation.
@@ -30,16 +34,22 @@ MTCD_EMAIL = os.getenv("MTCD_EMAIL", "tech@mtcd.org")
 MTCD_CLIENT_ID = os.getenv("MTCD_CLIENT_ID", "")
 MTCD_CLIENT_SECRET = os.getenv("MTCD_CLIENT_SECRET", "")
 MTCD_PASSWORD = os.getenv("MTCD_PASSWORD", "")
-MTCD_SYNC_FOLDER = os.getenv("MTCD_SYNC_FOLDER", "Sync to Abraham")
 
 ABRAHAM_URL = os.getenv("ABRAHAM_URL", "https://pw.abraham16.com").rstrip("/")
 ABRAHAM_EMAIL = os.getenv("ABRAHAM_EMAIL", "ben@abraham16.com")
 ABRAHAM_CLIENT_ID = os.getenv("ABRAHAM_CLIENT_ID", "")
 ABRAHAM_CLIENT_SECRET = os.getenv("ABRAHAM_CLIENT_SECRET", "")
 ABRAHAM_PASSWORD = os.getenv("ABRAHAM_PASSWORD", "")
-ABRAHAM_SYNC_FOLDER = os.getenv("ABRAHAM_SYNC_FOLDER", "Sync to Abraham")
 
-SYNC_MODE = os.getenv("SYNC_MODE", "bidirectional").lower()  # bidirectional, mtcd_to_abraham, abraham_to_mtcd
+# Dual-channel folder configuration
+# Channel 1: MTCD -> Abraham
+MTCD_OUTBOUND_FOLDER = os.getenv("MTCD_OUTBOUND_FOLDER", "Sync to Abraham")
+ABRAHAM_INBOUND_FOLDER = os.getenv("ABRAHAM_INBOUND_FOLDER", "Sync from MTCD")
+
+# Channel 2: Abraham -> MTCD
+ABRAHAM_OUTBOUND_FOLDER = os.getenv("ABRAHAM_OUTBOUND_FOLDER", "Sync to MTCD")
+MTCD_INBOUND_FOLDER = os.getenv("MTCD_INBOUND_FOLDER", "Sync from Abraham")
+
 DATA_ROOT = os.getenv("BW_DATA_ROOT", "/bw-data")
 
 
@@ -131,15 +141,12 @@ def authenticate_and_unlock(name, app_dir, server_url, email, client_id, client_
     return session
 
 
-def get_or_create_folder(name, app_dir, session, folder_name, auto_create=True):
-    """Get folder by name, optionally creating it if missing."""
+def get_or_create_folder(name, app_dir, session, folder_name):
+    """Get folder by name, automatically creating it if missing."""
     folders = run_bw_json(app_dir, ["list", "folders"], session=session) or []
     for f in folders:
         if f.get("name", "").strip().lower() == folder_name.strip().lower():
             return f["id"]
-
-    if not auto_create:
-        raise ValueError(f"Folder '{folder_name}' not found on {name}")
 
     logger.info(f"Folder '{folder_name}' not found on {name}. Creating it now...")
     encoded = base64.b64encode(json.dumps({"name": folder_name}).encode()).decode()
@@ -181,7 +188,7 @@ def build_sync_payload(source_item, target_folder_id, sync_uuid):
     }
     sanitized_login = {k: v for k, v in sanitized_login.items() if v is not None}
 
-    # Filter out sync tracking fields from original fields
+    # Filter out internal sync tracking fields from original fields
     custom_fields = [
         f for f in (source_item.get("fields") or [])
         if f.get("name") not in ("_sync_uuid", "_sync_last_synced_at")
@@ -206,16 +213,125 @@ def build_sync_payload(source_item, target_folder_id, sync_uuid):
     return payload
 
 
+def sync_channel(
+    channel_name,
+    src_name, src_dir, src_session, src_folder_name,
+    dst_name, dst_dir, dst_session, dst_folder_name
+):
+    """Synchronize a directional channel between two folders with bidirectional updates."""
+    logger.info(f"--- Channel: {channel_name} [{src_name}: '{src_folder_name}' <---> {dst_name}: '{dst_folder_name}'] ---")
+
+    src_folder_id = get_or_create_folder(src_name, src_dir, src_session, src_folder_name)
+    dst_folder_id = get_or_create_folder(dst_name, dst_dir, dst_session, dst_folder_name)
+
+    src_items = run_bw_json(src_dir, ["list", "items", "--folderid", src_folder_id], session=src_session) or []
+    dst_items = run_bw_json(dst_dir, ["list", "items", "--folderid", dst_folder_id], session=dst_session) or []
+
+    logger.info(f"Items in {src_name} ('{src_folder_name}'): {len(src_items)}")
+    logger.info(f"Items in {dst_name} ('{dst_folder_name}'): {len(dst_items)}")
+
+    # Index destination items by _sync_uuid and by (name, username) fallback
+    dst_uuid_map = {}
+    dst_name_map = {}
+    for item in dst_items:
+        u = get_sync_uuid(item)
+        if u:
+            dst_uuid_map[u] = item
+        uname = (item.get("login") or {}).get("username") or ""
+        key = (item.get("name", "").strip().lower(), uname.strip().lower())
+        dst_name_map[key] = item
+
+    src_uuid_map = {}
+    for item in src_items:
+        u = get_sync_uuid(item)
+        if u:
+            src_uuid_map[u] = item
+
+    created = 0
+    updated = 0
+    unchanged = 0
+
+    # 1. Forward Sync: Source -> Destination
+    for src_item in src_items:
+        item_name = src_item.get("name", "Unknown")
+        sync_uuid = get_sync_uuid(src_item)
+
+        if not sync_uuid:
+            uname = (src_item.get("login") or {}).get("username") or ""
+            fallback_key = (src_item.get("name", "").strip().lower(), uname.strip().lower())
+            if fallback_key in dst_name_map:
+                matched = dst_name_map[fallback_key]
+                sync_uuid = get_sync_uuid(matched) or str(uuid.uuid4())
+            else:
+                sync_uuid = str(uuid.uuid4())
+
+            logger.info(f"[{channel_name}] Assigning _sync_uuid [{sync_uuid}] to {src_name} item '{item_name}'")
+            src_item = set_sync_uuid(src_dir, src_session, src_item, sync_uuid)
+            src_uuid_map[sync_uuid] = src_item
+
+        dst_match = dst_uuid_map.get(sync_uuid)
+        if not dst_match:
+            uname = (src_item.get("login") or {}).get("username") or ""
+            fallback_key = (src_item.get("name", "").strip().lower(), uname.strip().lower())
+            dst_match = dst_name_map.get(fallback_key)
+
+        if not dst_match:
+            # Create in destination
+            passkeys = len((src_item.get("login") or {}).get("fido2Credentials", []))
+            has_totp = bool((src_item.get("login") or {}).get("totp"))
+            logger.info(f"[{channel_name}] CREATE -> {dst_name}: '{item_name}' (Passkeys: {passkeys}, OTP: {'Yes' if has_totp else 'No'})")
+            payload = build_sync_payload(src_item, dst_folder_id, sync_uuid)
+            encoded = base64.b64encode(json.dumps(payload).encode()).decode()
+            created_item = run_bw_json(dst_dir, ["create", "item"], session=dst_session, stdin_data=encoded)
+            dst_uuid_map[sync_uuid] = created_item
+            created += 1
+        else:
+            # Existing item: compare revision dates
+            src_rev = isoparse(src_item["revisionDate"])
+            dst_rev = isoparse(dst_match["revisionDate"])
+
+            if src_rev > dst_rev:
+                logger.info(f"[{channel_name}] UPDATE -> {dst_name}: '{item_name}' ({src_name} is newer)")
+                payload = build_sync_payload(src_item, dst_folder_id, sync_uuid)
+                payload["id"] = dst_match["id"]
+                encoded = base64.b64encode(json.dumps(payload).encode()).decode()
+                run_bw_json(dst_dir, ["edit", "item", dst_match["id"]], session=dst_session, stdin_data=encoded)
+                updated += 1
+            elif dst_rev > src_rev:
+                logger.info(f"[{channel_name}] UPDATE -> {src_name}: '{item_name}' ({dst_name} is newer)")
+                payload = build_sync_payload(dst_match, src_folder_id, sync_uuid)
+                payload["id"] = src_item["id"]
+                encoded = base64.b64encode(json.dumps(payload).encode()).decode()
+                run_bw_json(src_dir, ["edit", "item", src_item["id"]], session=src_session, stdin_data=encoded)
+                updated += 1
+            else:
+                unchanged += 1
+
+    # 2. Reverse Sync for items placed directly in the destination folder
+    for dst_item in dst_items:
+        sync_uuid = get_sync_uuid(dst_item)
+        item_name = dst_item.get("name", "Unknown")
+        if sync_uuid and sync_uuid not in src_uuid_map:
+            logger.info(f"[{channel_name}] CREATE -> {src_name}: '{item_name}' (Reverse synced from {dst_name})")
+            payload = build_sync_payload(dst_item, src_folder_id, sync_uuid)
+            encoded = base64.b64encode(json.dumps(payload).encode()).decode()
+            created_item = run_bw_json(src_dir, ["create", "item"], session=src_session, stdin_data=encoded)
+            src_uuid_map[sync_uuid] = created_item
+            created += 1
+
+    logger.info(f"[{channel_name}] Results: {created} created, {updated} updated, {unchanged} unchanged")
+    return created, updated, unchanged
+
+
 def main():
     validate_config()
 
     mtcd_app_dir = os.path.join(DATA_ROOT, "mtcd")
     abraham_app_dir = os.path.join(DATA_ROOT, "abraham")
 
-    logger.info("=== Starting Vaultwarden Multi-Instance Sync ===")
-    logger.info(f"Sync Mode: {SYNC_MODE.upper()}")
-    logger.info(f"Source Folder (MTCD): '{MTCD_SYNC_FOLDER}'")
-    logger.info(f"Target Folder (Abraham): '{ABRAHAM_SYNC_FOLDER}'")
+    logger.info("=== Starting Vaultwarden Multi-Instance Dual-Channel Sync ===")
+    logger.info(f"Channel 1: MTCD '{MTCD_OUTBOUND_FOLDER}' <---> Abraham '{ABRAHAM_INBOUND_FOLDER}'")
+    logger.info(f"Channel 2: Abraham '{ABRAHAM_OUTBOUND_FOLDER}' <---> MTCD '{MTCD_INBOUND_FOLDER}'")
 
     session_mtcd = None
     session_abraham = None
@@ -230,112 +346,31 @@ def main():
             ABRAHAM_CLIENT_ID, ABRAHAM_CLIENT_SECRET, ABRAHAM_PASSWORD
         )
 
-        # 1. Discover folders
-        mtcd_folder_id = get_or_create_folder("MTCD", mtcd_app_dir, session_mtcd, MTCD_SYNC_FOLDER, auto_create=False)
-        abraham_folder_id = get_or_create_folder("Abraham", abraham_app_dir, session_abraham, ABRAHAM_SYNC_FOLDER, auto_create=True)
+        total_created = 0
+        total_updated = 0
+        total_unchanged = 0
 
-        logger.info(f"MTCD Folder ID: {mtcd_folder_id}")
-        logger.info(f"Abraham Folder ID: {abraham_folder_id}")
+        # Channel 1: MTCD Outbound ('Sync to Abraham') -> Abraham Inbound ('Sync from MTCD')
+        c1, u1, nc1 = sync_channel(
+            "MTCD->Abraham",
+            "MTCD", mtcd_app_dir, session_mtcd, MTCD_OUTBOUND_FOLDER,
+            "Abraham", abraham_app_dir, session_abraham, ABRAHAM_INBOUND_FOLDER
+        )
+        total_created += c1
+        total_updated += u1
+        total_unchanged += nc1
 
-        # 2. Fetch items from both folders
-        mtcd_items = run_bw_json(mtcd_app_dir, ["list", "items", "--folderid", mtcd_folder_id], session=session_mtcd) or []
-        abraham_items = run_bw_json(abraham_app_dir, ["list", "items", "--folderid", abraham_folder_id], session=session_abraham) or []
+        # Channel 2: Abraham Outbound ('Sync to MTCD') -> MTCD Inbound ('Sync from Abraham')
+        c2, u2, nc2 = sync_channel(
+            "Abraham->MTCD",
+            "Abraham", abraham_app_dir, session_abraham, ABRAHAM_OUTBOUND_FOLDER,
+            "MTCD", mtcd_app_dir, session_mtcd, MTCD_INBOUND_FOLDER
+        )
+        total_created += c2
+        total_updated += u2
+        total_unchanged += nc2
 
-        logger.info(f"Found {len(mtcd_items)} item(s) in MTCD '{MTCD_SYNC_FOLDER}'")
-        logger.info(f"Found {len(abraham_items)} item(s) in Abraham '{ABRAHAM_SYNC_FOLDER}'")
-
-        # Build index maps by _sync_uuid and by (name, username) fallback
-        abraham_uuid_map = {}
-        abraham_name_map = {}
-        for item in abraham_items:
-            u = get_sync_uuid(item)
-            if u:
-                abraham_uuid_map[u] = item
-            uname = (item.get("login") or {}).get("username") or ""
-            key = (item.get("name", "").strip().lower(), uname.strip().lower())
-            abraham_name_map[key] = item
-
-        mtcd_uuid_map = {}
-        for item in mtcd_items:
-            u = get_sync_uuid(item)
-            if u:
-                mtcd_uuid_map[u] = item
-
-        created_count = 0
-        updated_count = 0
-        unchanged_count = 0
-
-        # 3. Process items from MTCD -> Abraham
-        for mtcd_item in mtcd_items:
-            item_name = mtcd_item.get("name", "Unknown")
-            sync_uuid = get_sync_uuid(mtcd_item)
-
-            if not sync_uuid:
-                # Check fallback match before creating a new UUID
-                uname = (mtcd_item.get("login") or {}).get("username") or ""
-                fallback_key = (mtcd_item.get("name", "").strip().lower(), uname.strip().lower())
-                if fallback_key in abraham_name_map:
-                    matched = abraham_name_map[fallback_key]
-                    sync_uuid = get_sync_uuid(matched) or str(uuid.uuid4())
-                else:
-                    sync_uuid = str(uuid.uuid4())
-
-                logger.info(f"Assigning new _sync_uuid [{sync_uuid}] to MTCD item '{item_name}'")
-                mtcd_item = set_sync_uuid(mtcd_app_dir, session_mtcd, mtcd_item, sync_uuid)
-                mtcd_uuid_map[sync_uuid] = mtcd_item
-
-            # Check if this item exists in Abraham
-            abraham_match = abraham_uuid_map.get(sync_uuid)
-            if not abraham_match:
-                uname = (mtcd_item.get("login") or {}).get("username") or ""
-                fallback_key = (mtcd_item.get("name", "").strip().lower(), uname.strip().lower())
-                abraham_match = abraham_name_map.get(fallback_key)
-
-            if not abraham_match:
-                # Create in Abraham
-                logger.info(f"[CREATE -> Abraham] Syncing '{item_name}' (Passkeys: {len((mtcd_item.get('login') or {}).get('fido2Credentials', []))}, OTP: {'Yes' if (mtcd_item.get('login') or {}).get('totp') else 'No'})")
-                payload = build_sync_payload(mtcd_item, abraham_folder_id, sync_uuid)
-                encoded = base64.b64encode(json.dumps(payload).encode()).decode()
-                created = run_bw_json(abraham_app_dir, ["create", "item"], session=session_abraham, stdin_data=encoded)
-                abraham_uuid_map[sync_uuid] = created
-                created_count += 1
-            else:
-                # Item exists on both sides: compare revision dates
-                mtcd_rev = isoparse(mtcd_item["revisionDate"])
-                abraham_rev = isoparse(abraham_match["revisionDate"])
-
-                if mtcd_rev > abraham_rev:
-                    logger.info(f"[UPDATE -> Abraham] MTCD version is newer for '{item_name}' ({mtcd_rev} > {abraham_rev})")
-                    payload = build_sync_payload(mtcd_item, abraham_folder_id, sync_uuid)
-                    payload["id"] = abraham_match["id"]
-                    encoded = base64.b64encode(json.dumps(payload).encode()).decode()
-                    run_bw_json(abraham_app_dir, ["edit", "item", abraham_match["id"]], session=session_abraham, stdin_data=encoded)
-                    updated_count += 1
-                elif abraham_rev > mtcd_rev and SYNC_MODE == "bidirectional":
-                    logger.info(f"[UPDATE -> MTCD] Abraham version is newer for '{item_name}' ({abraham_rev} > {mtcd_rev})")
-                    payload = build_sync_payload(abraham_match, mtcd_folder_id, sync_uuid)
-                    payload["id"] = mtcd_item["id"]
-                    encoded = base64.b64encode(json.dumps(payload).encode()).decode()
-                    run_bw_json(mtcd_app_dir, ["edit", "item", mtcd_item["id"]], session=session_mtcd, stdin_data=encoded)
-                    updated_count += 1
-                else:
-                    unchanged_count += 1
-
-        # 4. Check for Abraham-only items if bidirectional
-        if SYNC_MODE == "bidirectional":
-            for abraham_item in abraham_items:
-                sync_uuid = get_sync_uuid(abraham_item)
-                item_name = abraham_item.get("name", "Unknown")
-                if sync_uuid and sync_uuid not in mtcd_uuid_map:
-                    # Item exists in Abraham's sync folder but not yet in MTCD
-                    logger.info(f"[CREATE -> MTCD] Syncing Abraham item '{item_name}' to MTCD...")
-                    payload = build_sync_payload(abraham_item, mtcd_folder_id, sync_uuid)
-                    encoded = base64.b64encode(json.dumps(payload).encode()).decode()
-                    created = run_bw_json(mtcd_app_dir, ["create", "item"], session=session_mtcd, stdin_data=encoded)
-                    mtcd_uuid_map[sync_uuid] = created
-                    created_count += 1
-
-        logger.info(f"=== Sync Complete: {created_count} created, {updated_count} updated, {unchanged_count} unchanged ===")
+        logger.info(f"=== All Channels Complete: {total_created} created, {total_updated} updated, {total_unchanged} unchanged ===")
 
     except Exception as exc:
         logger.error(f"Sync execution failed: {exc}", exc_info=True)
