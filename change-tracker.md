@@ -1,5 +1,37 @@
 # Change Tracker — CronDock
 
+### 2026-10-03 — v1.4.0: In-Browser Script Manager with Syntax Correction
+- **Feature**: Implemented full in-browser script management enabling users to upload, view, edit (with automated syntax correction), test-run, and save shell and Python scripts directly from the CronDock web interface.
+- **Backend Implementation**:
+  1. `app/scripts_manager.py`: Modular script operations engine supporting safe filename sanitization (preventing directory traversal / shell injection), reading/writing to `/data/scripts/`, setting `0755` executable permissions, and normalizing CRLF to Unix LF.
+  2. **Deep Syntax Validation**:
+     - Bash scripts verified via `bash -n` in a non-executing subshell, parsing line numbers, error descriptions, and providing contextual guidance hints (e.g., missing `then`, unbalanced loops, unclosed quotes).
+     - Python scripts verified via `ast.parse()`, capturing syntax errors with line, column, and code snippets.
+     - Detects Windows CRLF line endings (`\r\n`) and Unicode smart/curly typography quotes (`“”‘’—`).
+  3. **Automated 1-Click Syntax Correction**:
+     - Automatically cleans CRLF to LF.
+     - Replaces Unicode curly/smart quotes with standard ASCII equivalents.
+     - Adds proper shebang (`#!/usr/bin/env bash` or `#!/usr/bin/env python3`) if missing.
+     - Trims trailing whitespace.
+  4. **Subshell Test Runner**: `POST /api/scripts/{filename}/test-run` executes scripts in container subshell with output streaming, exit code capture, and millisecond duration measurement.
+  5. **API Endpoints**: Full REST suite for listing scripts, reading, creating, uploading (multipart `UploadFile`), updating, deleting, checking syntax, and test running.
+- **Frontend Implementation**:
+  1. **Scripts Navigation & Card View**: Dedicated `📜 Scripts` section showing cards with script language icon, file size, timestamps, permission badges, and cross-referenced linkages to active jobs using each script.
+  2. **CodeMirror 5 Editor**: Vendored local CodeMirror 5 dark theme with syntax highlighting, matching brackets, active line highlighting, unsaved changes tracking, and keyboard shortcuts (`Ctrl/Cmd+S` to save, `Ctrl/Cmd+Shift+F` to auto-fix).
+  3. **Multi-File Drag & Drop & Upload**: Visual drop zone for dropping scripts directly into the browser.
+  4. **Live Syntax Status Bar**: Visual indicator showing green/amber/red syntax state with clickable error pills that jump straight to the offending line in the editor.
+  5. **Job Drawer Integration**: Added script selector dropdown in the Job creation/edit drawer to insert `/data/scripts/{name}` directly into shell commands with 1-click jump to edit.
+- **Validation**:
+  - Python files compiled cleanly with 0 syntax errors.
+  - JavaScript syntax verified with `node -c app/static/app.js`.
+  - Built Docker image `benny2168/crondock:1.4.0` and `latest`.
+  - Recreated local container via `docker compose up -d`.
+  - Health check `GET /api/health` verified returning `{"ok":true,"version":"1.4.0"}`.
+  - Tested `GET /api/scripts` returning all 4 existing scripts with correct job links.
+  - Tested `POST /api/scripts/check-syntax` with valid, invalid, and smart-quote/CRLF scripts with 1-click auto-fix verified.
+  - Tested `POST /api/scripts`, multipart upload `/api/scripts/upload`, `test-run`, and `DELETE`.
+  - Verified all static web assets return HTTP 200 OK.
+
 ### 2026-09-21 — v1.3.4: Vaultwarden Standby Restore & CronDock Log Output Streaming
 - **Issues**:
   1. Vaultwarden Standby Restore (Job #7) showed failed in CronDock.

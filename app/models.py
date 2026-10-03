@@ -87,3 +87,68 @@ class SettingResponse(SettingBase):
     updated_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+
+# ── Script Models ─────────────────────────────────────────────────────────────
+
+from typing import List, Dict, Any
+
+
+class ScriptLinkedJob(BaseModel):
+    id: int
+    name: str
+    enabled: bool
+
+
+class ScriptSummary(BaseModel):
+    name: str
+    path: str
+    size: int
+    modified_at: str
+    is_executable: bool
+    type: str
+    job_count: int = 0
+    jobs: List[ScriptLinkedJob] = []
+
+
+class ScriptDetail(BaseModel):
+    name: str
+    path: str
+    content: str
+    size: int
+    modified_at: str
+    is_executable: bool
+    type: str
+    job_count: int = 0
+    jobs: List[ScriptLinkedJob] = []
+
+
+class ScriptSaveRequest(BaseModel):
+    name: Optional[str] = None
+    content: str
+    make_executable: bool = True
+
+
+class ScriptCheckSyntaxRequest(BaseModel):
+    name: Optional[str] = "script.sh"
+    content: str
+    type: Optional[str] = None
+
+
+class ScriptCheckSyntaxResponse(BaseModel):
+    valid: bool
+    type: str
+    errors: List[Dict[str, Any]] = []
+    warnings: List[Dict[str, Any]] = []
+    fixes_available: List[str] = []
+    fixed_content: Optional[str] = None
+
+
+class ScriptTestRunResponse(BaseModel):
+    exit_code: int
+    success: bool
+    stdout: str
+    stderr: str
+    output: str
+    duration_ms: int
+

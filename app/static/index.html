@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>CronDock — Cron Job Manager</title>
   <meta name="description" content="Self-hosted cron job manager with a beautiful web UI. Schedule shell commands and HTTP requests." />
+  <link rel="stylesheet" href="/static/vendor/codemirror/codemirror.min.css" />
   <link rel="stylesheet" href="/static/style.css" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⏱</text></svg>" />
 </head>
@@ -17,7 +18,7 @@
       <div class="logo-icon">⏱</div>
       <div>
         <div class="logo-text">CronDock</div>
-        <div class="logo-sub">v1.3.3</div>
+        <div class="logo-sub">v1.4.0</div>
       </div>
     </div>
 
@@ -25,6 +26,10 @@
       <button class="nav-item active" onclick="showSection('jobs')" id="nav-jobs">
         <span class="nav-icon">📋</span>
         <span>Jobs</span>
+      </button>
+      <button class="nav-item" onclick="showSection('scripts')" id="nav-scripts">
+        <span class="nav-icon">📜</span>
+        <span>Scripts</span>
       </button>
       <button class="nav-item" onclick="showSection('timeline')" id="nav-timeline">
         <span class="nav-icon">📅</span>
@@ -68,6 +73,40 @@
           <div class="empty-state">
             <div class="empty-icon">🕐</div>
             <h3>Loading jobs…</h3>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Scripts section -->
+    <div id="section-scripts" class="section">
+      <div class="topbar">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div class="topbar-title">Scripts</div>
+          <span class="path-badge">/data/scripts/</span>
+        </div>
+        <div class="topbar-actions">
+          <input type="text" id="script-search-input" class="form-input" placeholder="Search scripts…" style="width:200px;font-size:12.5px;padding:5px 10px;" oninput="filterScriptsList()" />
+          <input type="file" id="script-file-input" style="display:none;" onchange="handleScriptFileUpload(event)" accept=".sh,.py,.bash,.txt,.json,.conf" multiple />
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('script-file-input').click()">📤 Upload</button>
+          <button class="btn btn-primary btn-sm" onclick="openScriptEditor(null)">＋ New Script</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadScripts()" id="scripts-refresh-btn">↻ Refresh</button>
+        </div>
+      </div>
+      <div class="content-area">
+        <!-- Drag & Drop Zone -->
+        <div id="scripts-dropzone" class="scripts-dropzone" ondragover="onScriptDragOver(event)" ondragleave="onScriptDragLeave(event)" ondrop="onScriptDrop(event)" onclick="document.getElementById('script-file-input').click()">
+          <div class="dropzone-icon">📁</div>
+          <div class="dropzone-text">
+            <strong>Drop script files here</strong> or click to upload (.sh, .py, .bash)
+          </div>
+          <div class="dropzone-sub">Files are automatically given executable permissions (0755) in <code>/data/scripts</code></div>
+        </div>
+
+        <!-- Scripts Grid -->
+        <div class="scripts-grid" id="scripts-grid">
+          <div class="empty-state">
+            <div class="spinner"></div>
           </div>
         </div>
       </div>
@@ -381,12 +420,20 @@
         <!-- Shell fields -->
         <div id="shell-fields" style="display:none;">
           <div class="form-group">
-            <label class="form-label" for="job-command">Shell Command *</label>
+            <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+              <label class="form-label" for="job-command" style="margin-bottom:0;">Shell Command *</label>
+              <div style="display:flex;align-items:center;gap:6px;">
+                <select id="job-script-select" class="form-select" style="font-size:11px;padding:3px 8px;width:auto;" onchange="insertScriptToJobCommand(this.value)">
+                  <option value="">Insert script from /data/scripts…</option>
+                </select>
+                <button type="button" class="btn btn-ghost btn-sm" style="font-size:11px;padding:3px 8px;" onclick="openSelectedScriptInEditor()">✏ Edit</button>
+              </div>
+            </div>
             <textarea class="form-textarea" id="job-command"
-              placeholder="curl -X POST https://example.com/api/run"
+              placeholder="/data/scripts/my-script.sh"
               style="min-height:100px;"></textarea>
             <div class="code-hint">
-              Runs in <code>/bin/sh</code>. Supports <code>{{SETTING_KEY}}</code> placeholders.
+              Runs in <code>/bin/sh</code>. Supports <code>{{SETTING_KEY}}</code> placeholders and scripts in <code>/data/scripts/</code>.
             </div>
           </div>
         </div>
@@ -463,6 +510,81 @@
   </div>
 </div>
 
+<!-- ── Script Editor Drawer ─────────────────────────────────────── -->
+<div class="drawer-overlay" id="script-editor-overlay" onclick="closeScriptEditor(event)">
+  <div class="drawer drawer-wide" onclick="event.stopPropagation()">
+    <div class="drawer-header">
+      <div style="display:flex;align-items:center;gap:10px;flex:1;overflow:hidden;margin-right:12px;">
+        <span style="font-size:18px;" id="script-editor-icon">📜</span>
+        <input type="text" id="script-editor-name" class="form-input form-input-title"
+          placeholder="script-name.sh" autocomplete="off" oninput="onScriptNameChange()" />
+        <select id="script-editor-mode" class="form-select" style="width:130px;font-size:12px;padding:5px 8px;" onchange="onScriptModeSelect()">
+          <option value="auto">Auto Mode</option>
+          <option value="shell">Bash / Shell</option>
+          <option value="python">Python</option>
+        </select>
+        <span id="script-unsaved-badge" class="unsaved-badge" style="display:none;">● Unsaved</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="runScriptSyntaxAutoFix()" title="Auto-fix CRLF line endings, smart quotes, formatting, and shebang" id="btn-script-autofix">
+          ✨ Fix & Format
+        </button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="validateScriptSyntax(true)" title="Run syntax validation check" id="btn-script-syntax">
+          🔍 Check Syntax
+        </button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="runScriptTestFromEditor()" title="Run this script directly in container" id="btn-script-test">
+          ▶ Test Run
+        </button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="saveCurrentScript()" id="btn-script-save">
+          💾 Save
+        </button>
+        <button class="btn btn-ghost btn-icon" onclick="closeScriptEditor()">✕</button>
+      </div>
+    </div>
+
+    <!-- Syntax feedback bar -->
+    <div id="script-syntax-bar" class="script-syntax-bar">
+      <div class="syntax-status-pill" id="syntax-status-pill">
+        <span class="dot"></span>
+        <span id="syntax-status-text">Ready</span>
+      </div>
+      <div id="syntax-messages" class="syntax-messages"></div>
+    </div>
+
+    <div class="drawer-body script-editor-body">
+      <!-- CodeMirror container -->
+      <div id="script-editor-container" class="script-editor-container">
+        <textarea id="script-editor-fallback" class="script-editor-fallback" placeholder="# Write your script here..."></textarea>
+      </div>
+
+      <!-- Test run output console (collapsible) -->
+      <div id="script-console-panel" class="script-console-panel" style="display:none;">
+        <div class="console-header">
+          <div style="display:flex;align-items:center;gap:10px;">
+            <span class="console-dot"></span>
+            <span class="console-title">Test Execution Output</span>
+            <span id="console-status-badge" class="badge">Exit 0</span>
+            <span id="console-duration" class="console-meta">—</span>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="closeScriptConsole()">✕ Close</button>
+        </div>
+        <pre id="console-output" class="console-output">(running script...)</pre>
+      </div>
+    </div>
+
+    <div class="drawer-footer script-editor-footer">
+      <div style="font-size:12px;color:var(--muted);display:flex;gap:16px;align-items:center;">
+        <span>Path: <code id="script-editor-path" style="color:var(--accent2);font-family:'JetBrains Mono',monospace;">/data/scripts/</code></span>
+        <span id="script-editor-shortcut-hint" style="opacity:0.7;">Ctrl/Cmd+S to Save · Ctrl/Cmd+Shift+F to Auto-Fix</span>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="closeScriptEditor()">Close</button>
+        <button class="btn btn-primary" onclick="saveCurrentScript()">Save Changes</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ── Log Modal ────────────────────────────────────────────────── -->
 <div class="modal-overlay" id="log-modal-overlay" onclick="closeLogModal(event)">
   <div class="modal" onclick="event.stopPropagation()">
@@ -478,6 +600,11 @@
 <!-- ── Toast container ──────────────────────────────────────────── -->
 <div class="toast-container" id="toast-container"></div>
 
+<script src="/static/vendor/codemirror/codemirror.min.js"></script>
+<script src="/static/vendor/codemirror/mode/shell/shell.min.js"></script>
+<script src="/static/vendor/codemirror/mode/python/python.min.js"></script>
+<script src="/static/vendor/codemirror/addon/edit/matchbrackets.min.js"></script>
+<script src="/static/vendor/codemirror/addon/selection/active-line.min.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

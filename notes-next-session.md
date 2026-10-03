@@ -1,5 +1,15 @@
 # Notes for Next Session — CronDock
 
+## Recently Completed (2026-10-03)
+**In-Browser Script Manager with Syntax Correction (v1.4.0)**:
+- **Full In-Browser Script Management**: Implemented dedicated `📜 Scripts` section with card view, metadata (size, timestamps, permissions 0755), search filter, and cross-referenced job linkages.
+- **CodeMirror Code Editor**: Embedded local CodeMirror 5 with dark theme matching CronDock's palette, syntax modes for Bash and Python, matching brackets, active line highlighting, unsaved changes tracking, and keyboard shortcuts (`Ctrl/Cmd+S` save, `Ctrl/Cmd+Shift+F` auto-fix).
+- **Deep Syntax Correction Engine**: Built `app/scripts_manager.py` with real-time `bash -n` validation and Python AST parsing.
+- **1-Click Auto-Fix**: Automatically detects and corrects Windows CRLF line endings to Unix LF, replaces Unicode typography/smart quotes (`“”‘’—`) with ASCII equivalents, inserts shebang if missing, and trims trailing whitespace.
+- **In-Browser Test Runner**: Executes scripts in container subshell with live output streaming, exit code capture, and millisecond timing before scheduling.
+- **Multi-File Drag & Drop & Upload**: Supports dragging script files directly into the browser drop zone.
+- **Job Drawer Integration**: Added script selector dropdown to automatically populate `/data/scripts/{name}` into shell commands with 1-click edit jump.
+
 ## Recently Completed (2026-09-21)
 Vaultwarden Standby Restore & CronDock Log Output Streaming:
 - **CronDock Log Streaming**:
@@ -15,10 +25,10 @@ Vaultwarden Standby Restore & CronDock Log Output Streaming:
 - **All 7 Jobs Green**: Every job in CronDock is enabled and showing `last_run_success = 1`.
 
 ## Immediate Backlog
-- **Uploadable scripts as a first-class UI feature**: Add UI section under Settings or Jobs for uploading, editing, listing, and deleting shell scripts stored in `/data/scripts/`.
 - **Per-job secrets/env vars**: Allow shell jobs to define custom environment variables passed to script execution.
 - **Failover Verification Drill**: Document / simulate UDM manual port-forward flip from `192.168.1.140:443` (Mac Mini) to `192.168.1.121:8443` (Synology NPM standby).
-- **Push commits**: Push local git commits to `mtcdtech/crondock` remote on `main`.
+- **Push commits**: Push local git commits to `origin/abraham` and `mtcdtech/main`.
+
 
 ## Retained Backlog
 - Support optional webhooks / notifications (Discord, Telegram, NTFY) on job failure.

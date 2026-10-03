@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import List, Optional
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -22,13 +22,20 @@ from auth import (
 )
 
 LOGIN_PROVIDER_NAME = os.getenv("LOGIN_PROVIDER_NAME", "Authentik SSO" if AUTH_PROVIDER == "oidc" else "Synology SSO")
-APP_VERSION = "1.3.3"
+APP_VERSION = "1.4.0"
 from database import Job, JobLog, SessionLocal, Setting, init_db, seed_defaults
 from models import (
     JobCreate, JobLogResponse, JobResponse, JobUpdate,
+    ScriptCheckSyntaxRequest, ScriptCheckSyntaxResponse,
+    ScriptDetail, ScriptSaveRequest, ScriptSummary, ScriptTestRunResponse,
     SettingCreate, SettingResponse,
 )
 from scheduler import scheduler_manager
+from scripts_manager import (
+    check_and_correct_syntax, delete_script_file, get_script_detail,
+    list_scripts, sanitize_filename, save_script_content, test_run_script,
+)
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -298,6 +305,121 @@ def delete_setting(key: str, db: Session = Depends(get_db)):
     db.delete(setting)
     db.commit()
     return {"ok": True}
+
+
+# ── Scripts ───────────────────────────────────────────────────────────────────
+
+@app.get("/api/scripts", response_model=List[ScriptSummary])
+def get_scripts(db: Session = Depends(get_db)):
+    """List all scripts in /data/scripts with metadata and linked jobs."""
+    return list_scripts(db)
+
+
+@app.get("/api/scripts/{filename}", response_model=ScriptDetail)
+def get_script(filename: str, db: Session = Depends(get_db)):
+    """Get script contents, metadata, and linked jobs."""
+    try:
+        return get_script_detail(filename, db)
+    except FileNotFoundError:
+        raise HTTPException(404, f"Script '{filename}' not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/scripts", response_model=ScriptDetail, status_code=201)
+def create_script(data: ScriptSaveRequest, db: Session = Depends(get_db)):
+    """Create a new script."""
+    if not data.name:
+        raise HTTPException(400, "Script name is required")
+    try:
+        saved_name = save_script_content(data.name, data.content, data.make_executable)
+        return get_script_detail(saved_name, db)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error(f"Error creating script: {e}")
+        raise HTTPException(500, f"Failed to save script: {e}")
+
+
+@app.post("/api/scripts/upload", response_model=ScriptDetail, status_code=201)
+async def upload_script_file(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Upload a script file from browser."""
+    try:
+        filename = sanitize_filename(file.filename)
+        content_bytes = await file.read()
+        try:
+            content_str = content_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            content_str = content_bytes.decode("latin1", errors="replace")
+
+        saved_name = save_script_content(filename, content_str, make_executable=True)
+        return get_script_detail(saved_name, db)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error(f"Error uploading script: {e}")
+        raise HTTPException(500, f"Failed to upload script: {e}")
+
+
+@app.put("/api/scripts/{filename}", response_model=ScriptDetail)
+def update_script(filename: str, data: ScriptSaveRequest, db: Session = Depends(get_db)):
+    """Update existing script content and/or rename."""
+    try:
+        target_name = data.name if data.name and data.name != filename else filename
+        if data.name and data.name != filename:
+            delete_script_file(filename)
+        saved_name = save_script_content(target_name, data.content, data.make_executable)
+        return get_script_detail(saved_name, db)
+    except FileNotFoundError:
+        raise HTTPException(404, f"Script '{filename}' not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error(f"Error updating script {filename}: {e}")
+        raise HTTPException(500, f"Failed to update script: {e}")
+
+
+@app.delete("/api/scripts/{filename}")
+def delete_script(filename: str):
+    """Delete a script file from /data/scripts."""
+    try:
+        delete_script_file(filename)
+        return {"ok": True, "message": f"Script '{filename}' deleted"}
+    except FileNotFoundError:
+        raise HTTPException(404, f"Script '{filename}' not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error(f"Error deleting script {filename}: {e}")
+        raise HTTPException(500, f"Failed to delete script: {e}")
+
+
+@app.post("/api/scripts/check-syntax", response_model=ScriptCheckSyntaxResponse)
+def check_script_syntax(data: ScriptCheckSyntaxRequest):
+    """Validate script syntax and generate automated syntax corrections."""
+    try:
+        return check_and_correct_syntax(data.name or "script.sh", data.content, data.type)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error(f"Error checking script syntax: {e}")
+        raise HTTPException(500, f"Syntax verification failed: {e}")
+
+
+@app.post("/api/scripts/{filename}/test-run", response_model=ScriptTestRunResponse)
+def run_script_test(filename: str, timeout: int = 30):
+    """Test-run a script with live output and duration capture."""
+    try:
+        return test_run_script(filename, timeout=min(timeout, 120))
+    except FileNotFoundError:
+        raise HTTPException(404, f"Script '{filename}' not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        logger.error(f"Error testing script {filename}: {e}")
+        raise HTTPException(500, f"Failed to test script: {e}")
+
+
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────

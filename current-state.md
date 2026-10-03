@@ -3,12 +3,20 @@
 ## Architecture & Overview
 - **Service**: CronDock — Visual cron job manager with web UI
 - **Active Repository**: `mtcdtech/crondock` (canonical repository, `main` branch)
-- **Active Version**: `1.3.3`
+- **Active Version**: `1.4.0`
 - **Deployment Target**: Ben-Mac-Mini (Abraham Portainer endpoint 3)
 - **Public URL**: `https://cron.abraham16.com`
 - **Authentication**: Authentik SSO OIDC (`https://auth.abraham16.com`) + Programmatic API Token (`X-API-Key` header)
 
 ## Active Status
+- **In-Browser Script Manager (v1.4.0)**:
+  - **Storage**: Shell & Python scripts stored in `/data/scripts/` with guaranteed executable permissions (`0755`) and LF normalization.
+  - **Browser UI**: Dedicated `📜 Scripts` section with card view, search filter, file size, modification timestamps, permission badges, and cross-referenced job linkages.
+  - **Code Editor**: Integrated CodeMirror 5 dark theme with syntax highlighting for Bash and Python, matching brackets, active line highlight, and unsaved changes tracking.
+  - **Syntax Validation & Auto-Correction**: Deep validation via `bash -n` and Python AST. Automated 1-click syntax correction for Windows CRLF line endings, unicode smart quotes/dashes, missing shebangs, and trailing whitespace.
+  - **Direct Test Execution**: In-browser test runner executes scripts in container subshell with live output streaming, exit code capture, and millisecond execution timing.
+  - **Upload & Drag-and-Drop**: Multi-file drag-and-drop zone and upload button supporting `.sh`, `.py`, `.bash`, etc.
+  - **Job Drawer Integration**: Script selector helper dropdown in Job creation/edit drawer to insert `/data/scripts/{name}` directly into shell commands.
 - **Authentication**: Authentik SSO OIDC integrated (`auth.abraham16.com`) for web UI users, plus programmatic API token authentication via `X-API-Key` header for `/api/*` endpoints.
 - **Host-Operations Toolset**: Container image contains `docker` CLI, `sqlite3`, `rsync`, `openssh-client`, and `tar` to support shell jobs interacting with host containers and remote hosts.
 - **Database Concurrency**: SQLite configured with Write-Ahead Logging (`PRAGMA journal_mode=WAL`), `PRAGMA synchronous=NORMAL`, and 30-second busy timeout to eliminate write contention across threads.

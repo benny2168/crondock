@@ -6,12 +6,18 @@
 
 let _jobs = [];
 let _settings = [];
+let _scripts = [];
 let _currentJobType = 'http';
 let _editingJobId = null;
 let _editingSettingKey = null;
-let _countdownInterval = null;
+let _editingScriptName = null;
+let _codeMirrorInstance = null;
 let _pendingDeleteJobId = null;
 let _pendingDeleteSettingKey = null;
+let _pendingDeleteScriptName = null;
+let _syntaxCheckTimeout = null;
+let _hasUnsavedScriptChanges = false;
+let _countdownInterval = null;
 
 // ── Init ───────────────────────────────────────────────────────────────────
 
@@ -19,7 +25,9 @@ document.addEventListener('DOMContentLoaded', () => {
   loadUser();
   loadJobs();
   loadSettings();
+  loadScripts();
   setInterval(loadJobs, 15000);   // auto-refresh every 15s
+  setInterval(loadScripts, 30000); // auto-refresh scripts every 30s
   startCountdowns();
   // Initialize schedule picker
   window._sp = new SchedulePicker();
@@ -44,6 +52,7 @@ function showSection(name) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById(`section-${name}`).classList.add('active');
   document.getElementById(`nav-${name}`).classList.add('active');
+  if (name === 'scripts')   loadScripts();
   if (name === 'settings')  loadSettings();
   if (name === 'timeline')  loadTimeline();
 }
@@ -1109,4 +1118,671 @@ function tlCloseDetail(e) {
   const overlay = document.getElementById('tl-detail-overlay');
   if (overlay) overlay.classList.remove('open');
 }
+
+// ── Scripts Manager ─────────────────────────────────────────────────────────
+
+async function loadScripts() {
+  try {
+    _scripts = await api('GET', '/api/scripts');
+    renderScripts();
+    populateJobScriptSelect();
+  } catch (e) {
+    console.error('Failed to load scripts', e);
+    const grid = document.getElementById('scripts-grid');
+    if (grid && _scripts.length === 0) {
+      grid.innerHTML = `
+        <div class="empty-state" style="grid-column:1/-1;">
+          <div class="empty-icon">⚠️</div>
+          <h3>Failed to load scripts</h3>
+          <p style="color:var(--danger);">${esc(e.message)}</p>
+          <button class="btn btn-ghost btn-sm" onclick="loadScripts()" style="margin-top:10px;">↻ Retry</button>
+        </div>`;
+    }
+  }
+}
+
+function filterScriptsList() {
+  renderScripts();
+}
+
+function renderScripts() {
+  const grid = document.getElementById('scripts-grid');
+  if (!grid) return;
+
+  const query = (document.getElementById('script-search-input')?.value || '').toLowerCase().trim();
+  const filtered = _scripts.filter(s =>
+    s.name.toLowerCase().includes(query) ||
+    s.path.toLowerCase().includes(query) ||
+    (s.type && s.type.toLowerCase().includes(query))
+  );
+
+  if (_scripts.length === 0) {
+    grid.innerHTML = `
+      <div class="empty-state" style="grid-column:1/-1;padding:40px;">
+        <div class="empty-icon">📜</div>
+        <h3>No scripts uploaded yet</h3>
+        <p>Drop shell or python script files in the dropzone above, or click "+ New Script" to create one.</p>
+        <button class="btn btn-primary btn-sm" onclick="openScriptEditor(null)" style="margin-top:12px;">＋ Create First Script</button>
+      </div>`;
+    return;
+  }
+
+  if (filtered.length === 0) {
+    grid.innerHTML = `
+      <div class="empty-state" style="grid-column:1/-1;padding:30px;">
+        <div class="empty-icon">🔍</div>
+        <h3>No scripts match "${esc(query)}"</h3>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('script-search-input').value='';renderScripts();" style="margin-top:10px;">Clear Filter</button>
+      </div>`;
+    return;
+  }
+
+  grid.innerHTML = filtered.map(s => {
+    const isPython = s.type === 'python';
+    const icon = isPython ? '🐍' : '💻';
+    const typeLabel = isPython ? 'Python' : 'Bash / Shell';
+    const badgeCls = isPython ? 'script-badge-python' : 'script-badge-shell';
+
+    const sizeStr = s.size < 1024
+      ? `${s.size} B`
+      : s.size < 1024 * 1024
+      ? `${(s.size / 1024).toFixed(1)} KB`
+      : `${(s.size / (1024 * 1024)).toFixed(2)} MB`;
+
+    const modDt = s.modified_at ? formatDate(s.modified_at) : '—';
+    const permBadge = s.is_executable
+      ? `<span class="script-meta-item" style="color:var(--success);" title="Executable bit set">✓ 0755</span>`
+      : `<span class="script-meta-item" style="color:var(--warning);" title="Not marked executable">0644</span>`;
+
+    // Linked jobs
+    let jobsSection = '';
+    if (s.jobs && s.jobs.length > 0) {
+      const jobPills = s.jobs.map(j => `
+        <span class="script-job-pill" onclick="viewJobFromScript(${j.id})" title="Job #${j.id}: ${esc(j.name)} (Click to view)">
+          <span style="color:${j.enabled ? 'var(--success)' : 'var(--muted)'};">●</span>
+          <span>#${j.id} ${esc(j.name)}</span>
+        </span>
+      `).join('');
+      jobsSection = `
+        <div class="script-jobs-wrap">
+          <div class="script-jobs-title">Used in ${s.jobs.length} Job${s.jobs.length > 1 ? 's' : ''}</div>
+          <div class="script-job-pills">${jobPills}</div>
+        </div>`;
+    } else {
+      jobsSection = `
+        <div class="script-jobs-wrap">
+          <div class="script-jobs-title" style="color:var(--muted);font-weight:400;text-transform:none;">No linked jobs</div>
+        </div>`;
+    }
+
+    // Delete confirmation inline
+    const isPending = _pendingDeleteScriptName === s.name;
+    const deleteBtn = isPending
+      ? `<div class="confirm-row">
+           <span class="question" style="font-size:11px;">Delete?</span>
+           <button class="btn btn-danger btn-sm" onclick="confirmDeleteScript('${esc(s.name)}')">Yes</button>
+           <button class="btn btn-ghost btn-sm" onclick="cancelDeleteScript()">No</button>
+         </div>`
+      : `<button class="btn btn-ghost btn-sm" onclick="promptDeleteScript('${esc(s.name)}')" title="Delete script">🗑</button>`;
+
+    return `
+      <div class="script-card" id="script-card-${esc(s.name)}">
+        <div class="script-card-header">
+          <div class="script-card-title">
+            <span class="script-icon">${icon}</span>
+            <div style="overflow:hidden;">
+              <div class="script-filename" title="${esc(s.name)}">${esc(s.name)}</div>
+            </div>
+          </div>
+          <span class="script-badge ${badgeCls}">${typeLabel}</span>
+        </div>
+
+        <div class="script-meta-row">
+          <span class="script-meta-item">📁 ${esc(s.path)}</span>
+          <button class="script-copy-btn" onclick="copyScriptPath('${esc(s.path)}')" title="Copy absolute path">Copy</button>
+          <span>·</span>
+          <span class="script-meta-item">📦 ${sizeStr}</span>
+          <span>·</span>
+          ${permBadge}
+          <span>·</span>
+          <span class="script-meta-item" title="Modified timestamp">🕒 ${modDt}</span>
+        </div>
+
+        ${jobsSection}
+
+        <div class="script-card-actions">
+          <button class="btn btn-primary btn-sm" onclick="openScriptEditor('${esc(s.name)}')">✏ Edit</button>
+          <button class="btn btn-ghost btn-sm" onclick="runScriptTestFromCard('${esc(s.name)}')">▶ Test</button>
+          <button class="btn btn-ghost btn-sm" onclick="downloadScript('${esc(s.name)}')">📥 Download</button>
+          <div style="margin-left:auto;">${deleteBtn}</div>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function viewJobFromScript(jobId) {
+  showSection('jobs');
+  setTimeout(() => {
+    openJobDrawer(jobId);
+  }, 100);
+}
+
+function copyScriptPath(path) {
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(path).then(() => {
+      toast(`Copied ${path} to clipboard`, 'success');
+    }).catch(() => {
+      toast(`Path: ${path}`, 'info');
+    });
+  } else {
+    toast(`Path: ${path}`, 'info');
+  }
+}
+
+// ── Drag & Drop / Upload ───────────────────────────────────────────────────
+
+function onScriptDragOver(e) {
+  e.preventDefault();
+  const dz = document.getElementById('scripts-dropzone');
+  if (dz) dz.classList.add('dragover');
+}
+
+function onScriptDragLeave(e) {
+  e.preventDefault();
+  const dz = document.getElementById('scripts-dropzone');
+  if (dz) dz.classList.remove('dragover');
+}
+
+async function onScriptDrop(e) {
+  e.preventDefault();
+  const dz = document.getElementById('scripts-dropzone');
+  if (dz) dz.classList.remove('dragover');
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+    await uploadMultipleScriptFiles(e.dataTransfer.files);
+  }
+}
+
+async function handleScriptFileUpload(e) {
+  if (e.target.files && e.target.files.length > 0) {
+    await uploadMultipleScriptFiles(e.target.files);
+    e.target.value = '';
+  }
+}
+
+async function uploadMultipleScriptFiles(files) {
+  let successCount = 0;
+  for (const file of files) {
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const res = await fetch('/api/scripts/upload', {
+        method: 'POST',
+        body: fd,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: res.statusText }));
+        throw new Error(err.detail || res.statusText);
+      }
+      successCount++;
+    } catch (err) {
+      toast(`Failed to upload ${file.name}: ${err.message}`, 'error');
+    }
+  }
+  if (successCount > 0) {
+    toast(`Uploaded ${successCount} script${successCount > 1 ? 's' : ''}`, 'success');
+    await loadScripts();
+  }
+}
+
+// ── CodeMirror & Script Editor ─────────────────────────────────────────────
+
+function initCodeMirrorIfNeeded() {
+  if (_codeMirrorInstance) return _codeMirrorInstance;
+  const container = document.getElementById('script-editor-container');
+  const fallback = document.getElementById('script-editor-fallback');
+  if (!container) return null;
+
+  if (typeof CodeMirror !== 'undefined') {
+    if (fallback) fallback.style.display = 'none';
+    _codeMirrorInstance = CodeMirror(container, {
+      lineNumbers: true,
+      mode: 'shell',
+      matchBrackets: true,
+      styleActiveLine: true,
+      indentUnit: 2,
+      tabSize: 2,
+      indentWithTabs: false,
+      lineWrapping: false,
+      extraKeys: {
+        'Ctrl-S': () => saveCurrentScript(),
+        'Cmd-S': () => saveCurrentScript(),
+        'Ctrl-Shift-F': () => runScriptSyntaxAutoFix(),
+        'Cmd-Shift-F': () => runScriptSyntaxAutoFix(),
+        'Ctrl-Enter': () => runScriptTestFromEditor(),
+        'Cmd-Enter': () => runScriptTestFromEditor(),
+        'Tab': (cm) => cm.replaceSelection('  ', 'end'),
+      },
+    });
+
+    _codeMirrorInstance.on('change', () => {
+      _hasUnsavedScriptChanges = true;
+      const badge = document.getElementById('script-unsaved-badge');
+      if (badge) badge.style.display = 'inline-block';
+      clearTimeout(_syntaxCheckTimeout);
+      _syntaxCheckTimeout = setTimeout(() => validateScriptSyntax(false), 700);
+    });
+
+    return _codeMirrorInstance;
+  } else {
+    if (fallback) {
+      fallback.style.display = 'block';
+      fallback.addEventListener('input', () => {
+        _hasUnsavedScriptChanges = true;
+        const badge = document.getElementById('script-unsaved-badge');
+        if (badge) badge.style.display = 'inline-block';
+        clearTimeout(_syntaxCheckTimeout);
+        _syntaxCheckTimeout = setTimeout(() => validateScriptSyntax(false), 700);
+      });
+    }
+    return null;
+  }
+}
+
+function getScriptEditorValue() {
+  if (_codeMirrorInstance) return _codeMirrorInstance.getValue();
+  const fallback = document.getElementById('script-editor-fallback');
+  return fallback ? fallback.value : '';
+}
+
+function setScriptEditorValue(val) {
+  if (_codeMirrorInstance) {
+    _codeMirrorInstance.setValue(val || '');
+    _codeMirrorInstance.clearHistory();
+  }
+  const fallback = document.getElementById('script-editor-fallback');
+  if (fallback) fallback.value = val || '';
+}
+
+function updateCodeMirrorMode(mode) {
+  if (!_codeMirrorInstance) return;
+  const cmMode = mode === 'python' ? 'python' : 'shell';
+  _codeMirrorInstance.setOption('mode', cmMode);
+}
+
+function onScriptModeSelect() {
+  const mode = document.getElementById('script-editor-mode')?.value || 'auto';
+  if (mode !== 'auto') {
+    updateCodeMirrorMode(mode);
+  }
+  validateScriptSyntax(false);
+}
+
+function onScriptNameChange() {
+  const name = (document.getElementById('script-editor-name')?.value || '').trim();
+  const pathEl = document.getElementById('script-editor-path');
+  const iconEl = document.getElementById('script-editor-icon');
+  const modeSelect = document.getElementById('script-editor-mode');
+
+  if (pathEl) pathEl.textContent = `/data/scripts/${name || 'script.sh'}`;
+
+  const isPython = name.endsWith('.py');
+  if (iconEl) iconEl.textContent = isPython ? '🐍' : '💻';
+
+  if (modeSelect && modeSelect.value === 'auto') {
+    updateCodeMirrorMode(isPython ? 'python' : 'shell');
+  }
+
+  _hasUnsavedScriptChanges = true;
+  const badge = document.getElementById('script-unsaved-badge');
+  if (badge) badge.style.display = 'inline-block';
+}
+
+async function openScriptEditor(name) {
+  initCodeMirrorIfNeeded();
+  _editingScriptName = name;
+  _hasUnsavedScriptChanges = false;
+
+  const overlay = document.getElementById('script-editor-overlay');
+  const nameInput = document.getElementById('script-editor-name');
+  const modeSelect = document.getElementById('script-editor-mode');
+  const pathEl = document.getElementById('script-editor-path');
+  const unsavedBadge = document.getElementById('script-unsaved-badge');
+  const iconEl = document.getElementById('script-editor-icon');
+  closeScriptConsole();
+
+  if (unsavedBadge) unsavedBadge.style.display = 'none';
+
+  if (!name) {
+    // New script creation
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    const defaultName = `script-${randomSuffix}.sh`;
+    nameInput.value = defaultName;
+    modeSelect.value = 'shell';
+    if (iconEl) iconEl.textContent = '💻';
+    if (pathEl) pathEl.textContent = `/data/scripts/${defaultName}`;
+
+    const defaultTpl = `#!/usr/bin/env bash\nset -euo pipefail\n\n# Script: ${defaultName}\n# Created: ${new Date().toISOString().split('T')[0]}\n\necho "Running ${defaultName}..."\n`;
+    setScriptEditorValue(defaultTpl);
+    overlay.classList.add('open');
+
+    setTimeout(() => {
+      if (_codeMirrorInstance) {
+        _codeMirrorInstance.refresh();
+        _codeMirrorInstance.focus();
+        updateCodeMirrorMode('shell');
+      }
+      validateScriptSyntax(false);
+    }, 60);
+    return;
+  }
+
+  try {
+    const script = await api('GET', `/api/scripts/${encodeURIComponent(name)}`);
+    nameInput.value = script.name;
+    const isPython = script.type === 'python';
+    modeSelect.value = isPython ? 'python' : 'shell';
+    if (iconEl) iconEl.textContent = isPython ? '🐍' : '💻';
+    if (pathEl) pathEl.textContent = script.path;
+
+    setScriptEditorValue(script.content);
+    overlay.classList.add('open');
+
+    setTimeout(() => {
+      if (_codeMirrorInstance) {
+        _codeMirrorInstance.refresh();
+        _codeMirrorInstance.focus();
+        updateCodeMirrorMode(isPython ? 'python' : 'shell');
+      }
+      validateScriptSyntax(false);
+    }, 60);
+  } catch (e) {
+    toast(`Failed to load script ${name}: ${e.message}`, 'error');
+  }
+}
+
+function closeScriptEditor(e) {
+  if (e && e.target !== document.getElementById('script-editor-overlay')) return;
+  if (_hasUnsavedScriptChanges) {
+    if (!confirm('You have unsaved changes. Discard changes and close?')) return;
+  }
+  const overlay = document.getElementById('script-editor-overlay');
+  if (overlay) overlay.classList.remove('open');
+  closeScriptConsole();
+}
+
+// ── Syntax Checking & Auto-Correction ──────────────────────────────────────
+
+async function validateScriptSyntax(showToast = false) {
+  const name = (document.getElementById('script-editor-name')?.value || 'script.sh').trim();
+  const content = getScriptEditorValue();
+  const mode = document.getElementById('script-editor-mode')?.value || 'auto';
+
+  const statusPill = document.getElementById('syntax-status-pill');
+  const statusText = document.getElementById('syntax-status-text');
+  const msgsContainer = document.getElementById('syntax-messages');
+  if (!statusPill || !statusText || !msgsContainer) return;
+
+  try {
+    const res = await api('POST', '/api/scripts/check-syntax', {
+      name,
+      content,
+      type: mode === 'auto' ? null : mode,
+    });
+
+    const hasErrors = res.errors && res.errors.length > 0;
+    const hasWarnings = res.warnings && res.warnings.length > 0;
+
+    statusPill.className = 'syntax-status-pill ' + (!hasErrors ? (hasWarnings ? 'warning' : 'valid') : 'error');
+    statusText.textContent = !hasErrors ? (hasWarnings ? 'Valid (warnings)' : 'Syntax Valid') : 'Syntax Error';
+
+    let pills = '';
+    if (hasErrors) {
+      pills += res.errors.map(err => `
+        <span class="syntax-msg-pill err" onclick="jumpToEditorLine(${err.line}, ${err.column || 0})" title="${esc(err.hint ? err.hint + ' — ' + err.message : err.message)}">
+          ✕ Line ${err.line}: ${esc(err.message)}
+        </span>
+      `).join('');
+    }
+    if (hasWarnings) {
+      pills += res.warnings.map(w => `
+        <span class="syntax-msg-pill warn" onclick="jumpToEditorLine(${w.line}, 0)" title="${esc(w.hint ? w.hint + ' — ' + w.message : w.message)}">
+          ⚠️ ${esc(w.message)}
+        </span>
+      `).join('');
+    }
+    if (res.fixes_available && res.fixes_available.length > 0) {
+      pills += `
+        <button type="button" class="btn btn-ghost btn-sm" onclick="runScriptSyntaxAutoFix()" style="font-size:11px;padding:2px 8px;margin-left:6px;border-color:var(--accent);">
+          ✨ Auto-Fix (${res.fixes_available.length})
+        </button>`;
+    }
+    msgsContainer.innerHTML = pills;
+
+    if (showToast) {
+      if (!hasErrors && !hasWarnings) {
+        toast('✓ Script syntax is clean and valid!', 'success');
+      } else if (!hasErrors) {
+        toast(`⚠️ Valid with ${res.warnings.length} warning(s)`, 'info');
+      } else {
+        toast(`✕ Found ${res.errors.length} syntax error(s)`, 'error');
+      }
+    }
+    return res;
+  } catch (e) {
+    console.error('Syntax validation error', e);
+  }
+}
+
+async function runScriptSyntaxAutoFix() {
+  const name = (document.getElementById('script-editor-name')?.value || 'script.sh').trim();
+  const content = getScriptEditorValue();
+  const mode = document.getElementById('script-editor-mode')?.value || 'auto';
+
+  try {
+    const res = await api('POST', '/api/scripts/check-syntax', {
+      name,
+      content,
+      type: mode === 'auto' ? null : mode,
+    });
+
+    if (res.fixed_content && res.fixed_content !== content) {
+      const cursor = _codeMirrorInstance ? _codeMirrorInstance.getCursor() : null;
+      setScriptEditorValue(res.fixed_content);
+      if (_codeMirrorInstance && cursor) {
+        _codeMirrorInstance.setCursor(cursor);
+      }
+      _hasUnsavedScriptChanges = true;
+      const badge = document.getElementById('script-unsaved-badge');
+      if (badge) badge.style.display = 'inline-block';
+
+      const fixList = (res.fixes_available || []).join('; ');
+      toast(`✨ Applied fixes: ${fixList}`, 'success');
+      await validateScriptSyntax(false);
+    } else {
+      toast('✓ No syntax corrections needed — script is already clean!', 'info');
+    }
+  } catch (e) {
+    toast(`Auto-fix error: ${e.message}`, 'error');
+  }
+}
+
+function jumpToEditorLine(line, col = 0) {
+  if (_codeMirrorInstance) {
+    _codeMirrorInstance.setCursor({ line: Math.max(0, line - 1), ch: col });
+    _codeMirrorInstance.focus();
+  } else {
+    const fallback = document.getElementById('script-editor-fallback');
+    if (fallback) fallback.focus();
+  }
+}
+
+// ── Save & Delete Scripts ──────────────────────────────────────────────────
+
+async function saveCurrentScript() {
+  const nameInput = document.getElementById('script-editor-name');
+  const name = (nameInput?.value || '').trim();
+  if (!name) {
+    toast('Please specify a script filename', 'error');
+    return;
+  }
+  const content = getScriptEditorValue();
+  const saveBtn = document.getElementById('btn-script-save');
+  if (saveBtn) saveBtn.innerHTML = '<span class="spinner"></span>';
+
+  try {
+    let saved;
+    if (_editingScriptName) {
+      saved = await api('PUT', `/api/scripts/${encodeURIComponent(_editingScriptName)}`, {
+        name,
+        content,
+        make_executable: true,
+      });
+    } else {
+      saved = await api('POST', '/api/scripts', {
+        name,
+        content,
+        make_executable: true,
+      });
+    }
+
+    _editingScriptName = saved.name;
+    _hasUnsavedScriptChanges = false;
+    const badge = document.getElementById('script-unsaved-badge');
+    if (badge) badge.style.display = 'none';
+
+    const pathEl = document.getElementById('script-editor-path');
+    if (pathEl) pathEl.textContent = saved.path;
+
+    toast(`Script '${saved.name}' saved successfully`, 'success');
+    await loadScripts();
+    await validateScriptSyntax(false);
+  } catch (e) {
+    toast(`Failed to save script: ${e.message}`, 'error');
+  } finally {
+    if (saveBtn) saveBtn.innerHTML = '💾 Save';
+  }
+}
+
+function promptDeleteScript(name) {
+  _pendingDeleteScriptName = name;
+  renderScripts();
+}
+
+function cancelDeleteScript() {
+  _pendingDeleteScriptName = null;
+  renderScripts();
+}
+
+async function confirmDeleteScript(name) {
+  try {
+    await api('DELETE', `/api/scripts/${encodeURIComponent(name)}`);
+    _pendingDeleteScriptName = null;
+    toast(`Script '${name}' deleted`, 'info');
+    await loadScripts();
+  } catch (e) {
+    toast(`Error deleting script: ${e.message}`, 'error');
+  }
+}
+
+function downloadScript(name) {
+  api('GET', `/api/scripts/${encodeURIComponent(name)}`).then(detail => {
+    const blob = new Blob([detail.content], { type: 'text/plain;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast(`Downloaded ${name}`, 'success');
+  }).catch(e => {
+    toast(`Download failed: ${e.message}`, 'error');
+  });
+}
+
+// ── Test Execution Console ─────────────────────────────────────────────────
+
+async function runScriptTestFromCard(name) {
+  await openScriptEditor(name);
+  setTimeout(() => {
+    runScriptTestFromEditor();
+  }, 150);
+}
+
+async function runScriptTestFromEditor() {
+  const name = (document.getElementById('script-editor-name')?.value || '').trim();
+  if (!name) {
+    toast('Please name and save the script before testing', 'error');
+    return;
+  }
+
+  // Auto-save if unsaved
+  if (_hasUnsavedScriptChanges || !_editingScriptName) {
+    await saveCurrentScript();
+  }
+
+  const consolePanel = document.getElementById('script-console-panel');
+  const consoleOutput = document.getElementById('console-output');
+  const statusBadge = document.getElementById('console-status-badge');
+  const durationMeta = document.getElementById('console-duration');
+
+  consolePanel.style.display = 'flex';
+  consoleOutput.textContent = `[CronDock] Executing /data/scripts/${name}...\n`;
+  statusBadge.className = 'badge';
+  statusBadge.textContent = 'Running…';
+  durationMeta.textContent = '—';
+
+  try {
+    const res = await api('POST', `/api/scripts/${encodeURIComponent(name)}/test-run`);
+    statusBadge.className = res.success ? 'badge badge-http' : 'badge badge-danger';
+    statusBadge.textContent = res.success ? 'Exit 0 (Success)' : `Exit ${res.exit_code} (Failed)`;
+    durationMeta.textContent = `⏱ ${res.duration_ms}ms`;
+    consoleOutput.textContent = res.output || '(Execution completed with no output)';
+  } catch (e) {
+    statusBadge.className = 'badge badge-danger';
+    statusBadge.textContent = 'Error';
+    consoleOutput.textContent = `Execution failed: ${e.message}`;
+  }
+}
+
+function closeScriptConsole() {
+  const p = document.getElementById('script-console-panel');
+  if (p) p.style.display = 'none';
+}
+
+// ── Job Drawer Script Integration ──────────────────────────────────────────
+
+function populateJobScriptSelect() {
+  const sel = document.getElementById('job-script-select');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">Insert script from /data/scripts…</option>' +
+    _scripts.map(s => `<option value="${esc(s.name)}">${esc(s.name)}</option>`).join('');
+}
+
+function insertScriptToJobCommand(name) {
+  if (!name) return;
+  const cmd = document.getElementById('job-command');
+  if (!cmd) return;
+  const path = `/data/scripts/${name}`;
+  if (!cmd.value.trim()) {
+    cmd.value = path;
+  } else if (!cmd.value.includes(path)) {
+    cmd.value += `\n${path}`;
+  }
+  cmd.focus();
+}
+
+function openSelectedScriptInEditor() {
+  const sel = document.getElementById('job-script-select');
+  let name = sel ? sel.value : '';
+  if (!name) {
+    const cmdVal = document.getElementById('job-command')?.value || '';
+    const m = cmdVal.match(/\/data\/scripts\/([a-zA-Z0-9_\-\.]+)/);
+    if (m) name = m[1];
+  }
+  if (name) {
+    openScriptEditor(name);
+  } else {
+    toast('Select a script or specify /data/scripts/<name> in command', 'info');
+  }
+}
+
 
