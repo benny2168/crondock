@@ -151,3 +151,17 @@ create CronDock jobs #7 and #8) is separate. See notes-next-session.md.
   - Production health endpoint `https://cron.abraham16.com/api/health` confirmed returning `{"ok": true, "version": "1.1.0"}`.
   - Login page `https://cron.abraham16.com/login` confirmed rendering "Sign in with Authentik SSO".
   - Auth start endpoint `https://cron.abraham16.com/auth/start` verified returning HTTP 302 redirect to `https://auth.abraham16.com/application/o/authorize/`.
+
+### 2026-10-03 — Multi-Instance Vaultwarden Sync (MTCD <-> Abraham)
+- **Change**: Built and deployed a synchronization engine between Church (`pw.server.mtcd.org`) and Personal (`pw.abraham16.com`) Vaultwarden instances, preserving TOTP seeds and Passkeys (FIDO2 credentials).
+- **Actions**:
+  1. Created `scripts/vault-sync/sync.py` implementing isolated CLI sessions via `BITWARDENCLI_APPDATA_DIR`, folder discovery/auto-creation, `_sync_uuid` item binding, payload sanitization preserving `login.totp` and `login.fido2Credentials`, and timestamp-based conflict resolution (`revisionDate`).
+  2. Created `scripts/vault-sync/Dockerfile` packaging Node.js LTS, `@bitwarden/cli 2026.9.1`, and Python 3.
+  3. Built local Docker image `vw-sync:latest` on Apple Silicon ARM64.
+  4. Created CronDock runner script `scripts/abraham/vw-sync.sh` and deployed to `/Users/benny2168/Dockers/crondock/data/scripts/vw-sync.sh`.
+  5. Created configuration directory `/Users/benny2168/Dockers/crondock/data/vault-sync/` with template `vault-sync.env` (and repo example `scripts/vault-sync/vault-sync.env.example`).
+  6. Registered Job #9 in CronDock database with schedule `*/15 * * * *`.
+- **Validation**:
+  - `vw-sync:latest` container tested against missing config validation, logging clean error.
+  - Runner script `vw-sync.sh` tested inside `crondock` container via `docker exec`.
+  - CronDock restarted and confirmed healthy (`/api/health` -> 200).

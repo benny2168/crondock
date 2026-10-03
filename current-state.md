@@ -24,3 +24,8 @@
   4. `Docker Images Cleanup — Mac Mini` (`45 3 * * *`): Prunes dangling/unused images on Ben-Mac-Mini (Endpoint 3) — **Enabled & Verified**.
 - **Container**: `benny2168/crondock:1.3.3` running with mounts for `/data`, `/var/run/docker.sock`, `/root/.ssh` (id_ed25519 + known_hosts), `/host-backups`, `/nginx-proxy-src/data`, and `/nginx-proxy-src/letsencrypt`.
 - **Validation**: All 7 jobs tested, enabled, and verified green (`last_run_success = 1`) in production.
+- **Multi-Instance Vaultwarden Sync Active**:
+  - **Job #9: Vaultwarden Sync (MTCD <-> Abraham)** (`*/15 * * * *`): Synchronizes logins, TOTP 2FA seeds, and Passkeys (FIDO2 credentials) between `pw.server.mtcd.org` (`tech@mtcd.org`, folder `Sync to Abraham`) and `pw.abraham16.com` (`ben@abraham16.com`, folder `Sync to Abraham`).
+  - **Engine**: Dedicated `vw-sync:latest` container (Node.js LTS, `@bitwarden/cli 2026.9.1`, Python 3 dateutil).
+  - **Persistence & Isolation**: Separate session cache under `/data/vault-sync/bw-data/{mtcd,abraham}` using `BITWARDENCLI_APPDATA_DIR`.
+  - **Config**: `/data/vault-sync/vault-sync.env` (permissions 600).
