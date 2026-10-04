@@ -43,12 +43,12 @@ ABRAHAM_PASSWORD = os.getenv("ABRAHAM_PASSWORD", "")
 
 # Dual-channel folder configuration
 # Channel 1: MTCD -> Abraham
-MTCD_OUTBOUND_FOLDER = os.getenv("MTCD_OUTBOUND_FOLDER", "Sync to Abraham")
-ABRAHAM_INBOUND_FOLDER = os.getenv("ABRAHAM_INBOUND_FOLDER", "Sync from MTCD")
+MTCD_OUTBOUND_FOLDER = os.getenv("MTCD_OUTBOUND_FOLDER", "Sync to Abraham").strip("\x27\"")
+ABRAHAM_INBOUND_FOLDER = os.getenv("ABRAHAM_INBOUND_FOLDER", "Sync from MTCD").strip("\x27\"")
 
 # Channel 2: Abraham -> MTCD
-ABRAHAM_OUTBOUND_FOLDER = os.getenv("ABRAHAM_OUTBOUND_FOLDER", "Sync to MTCD")
-MTCD_INBOUND_FOLDER = os.getenv("MTCD_INBOUND_FOLDER", "Sync from Abraham")
+ABRAHAM_OUTBOUND_FOLDER = os.getenv("ABRAHAM_OUTBOUND_FOLDER", "Sync to MTCD").strip("\x27\"")
+MTCD_INBOUND_FOLDER = os.getenv("MTCD_INBOUND_FOLDER", "Sync from Abraham").strip("\x27\"")
 
 DATA_ROOT = os.getenv("BW_DATA_ROOT", "/bw-data")
 
@@ -174,6 +174,41 @@ def set_sync_uuid(app_dir, session, item, sync_uuid):
     return updated
 
 
+
+def items_equal(item_a, item_b):
+    """Compare content of two items to determine if an update is needed."""
+    if item_a.get("name") != item_b.get("name"):
+        return False
+    if (item_a.get("notes") or "") != (item_b.get("notes") or ""):
+        return False
+    if item_a.get("type", 1) != item_b.get("type", 1):
+        return False
+
+    login_a = item_a.get("login") or {}
+    login_b = item_b.get("login") or {}
+
+    if (login_a.get("username") or "") != (login_b.get("username") or ""):
+        return False
+    if (login_a.get("password") or "") != (login_b.get("password") or ""):
+        return False
+    if (login_a.get("totp") or "") != (login_b.get("totp") or ""):
+        return False
+
+    uris_a = [u.get("uri") for u in (login_a.get("uris") or []) if u.get("uri")]
+    uris_b = [u.get("uri") for u in (login_b.get("uris") or []) if u.get("uri")]
+    if uris_a != uris_b:
+        return False
+
+    fido_a = login_a.get("fido2Credentials") or []
+    fido_b = login_b.get("fido2Credentials") or []
+    creds_a = sorted([f.get("credentialId") for f in fido_a if f.get("credentialId")])
+    creds_b = sorted([f.get("credentialId") for f in fido_b if f.get("credentialId")])
+    if creds_a != creds_b:
+        return False
+
+    return True
+
+
 def build_sync_payload(source_item, target_folder_id, sync_uuid):
     """Build item payload for target vault, preserving OTP and Passkeys."""
     login_obj = source_item.get("login") or {}
@@ -286,6 +321,10 @@ def sync_channel(
             dst_uuid_map[sync_uuid] = created_item
             created += 1
         else:
+            if items_equal(src_item, dst_match):
+                unchanged += 1
+                continue
+
             # Existing item: compare revision dates
             src_rev = isoparse(src_item["revisionDate"])
             dst_rev = isoparse(dst_match["revisionDate"])

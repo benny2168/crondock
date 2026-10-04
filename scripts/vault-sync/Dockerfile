@@ -3,8 +3,9 @@ FROM node:lts-slim
 LABEL org.opencontainers.image.title="Vaultwarden Multi-Instance Sync"
 LABEL org.opencontainers.image.description="Sync items, TOTP, and Passkeys between Vaultwarden instances"
 
-# Install Bitwarden CLI and Python runtime
-RUN npm install -g @bitwarden/cli && npm cache clean --force
+# Pin @bitwarden/cli to 2026.8.0 to maintain full Vaultwarden compatibility
+# (2026.9.x introduces unbackported key_id_backfill API calls that fail on Vaultwarden)
+RUN npm install -g @bitwarden/cli@2026.8.0 && npm cache clean --force
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
     python3-dateutil \

@@ -197,3 +197,16 @@ create CronDock jobs #7 and #8) is separate. See notes-next-session.md.
   - `vw-sync:latest` container tested against missing config validation, logging clean error.
   - Runner script `vw-sync.sh` tested inside `crondock` container via `docker exec`.
   - CronDock restarted and confirmed healthy (`/api/health` -> 200).
+
+### 2026-10-03 — Fix: Bitwarden CLI Vaultwarden Compatibility & Idempotence
+- **Symptom**: `bw unlock` failed with `KeyIdBackfillError` (HTTP 404 from Vaultwarden) on `@bitwarden/cli 2026.9.1`. Unquoted folder names caused `to: command not found` when executing/sourcing env.
+- **Root Cause**: `@bitwarden/cli 2026.9.1` introduced unbackported `key_id_backfill` API endpoint calls unsupported by Vaultwarden. Also, bash treats unquoted spaces in variables as command executions if executed directly.
+- **Fix**:
+  1. Pinned `@bitwarden/cli` to stable `2026.8.0` in `Dockerfile`.
+  2. Added `.strip('\"\'')` to folder variables in `sync.py` to handle quoted and unquoted inputs.
+  3. Implemented deep `items_equal` content comparison in `sync.py` (checking names, notes, usernames, passwords, TOTP, URIs, and Passkey `credentialId`s) to eliminate timestamp ping-pong and make routine checks run in under 10 seconds.
+  4. Updated `vw-sync.sh` to automatically detect config in `/data/scripts/vault-sync.env` or `/data/vault-sync/vault-sync.env`.
+- **Validation**:
+  - Live execution verified: 36 items created on Abraham in `Sync from MTCD` on pass 1.
+  - Second pass verified: 36 items confirmed unchanged (`0 created, 0 updated, 36 unchanged`), exit code 0.
+  - CronDock Job #9 enabled and scheduled every 15 minutes.
