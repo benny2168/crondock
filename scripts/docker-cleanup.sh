@@ -23,12 +23,12 @@ prune_portainer_endpoint() {
     return 0
   fi
 
-  # 1. Prune temporary and unused containers
+  # 1. Prune temporary and unused containers (never prune standby containers)
   echo "Pruning temporary and unused containers..."
   local res
-  res=$(curl -s -k -X POST \
+  res=$(curl -s -k -L -X POST \
     -H "X-API-Key: ${token}" \
-    "${base_url}/api/endpoints/${endpoint_id}/docker/containers/prune" 2>&1 || true)
+    "${base_url}/api/endpoints/${endpoint_id}/docker/containers/prune?filters=%7B%22label!%22%3A%5B%22com.abraham16.role%3Dstandby%22%5D%7D" 2>&1 || true)
 
   if echo "${res}" | grep -q "ContainersDeleted"; then
     echo "✓ Container prune response: ${res}"
@@ -36,17 +36,17 @@ prune_portainer_endpoint() {
     echo "ℹ Container prune notice: ${res}"
   fi
 
-  # 2. Prune dangling/unused images
-  echo "Pruning dangling and unused images..."
+  # 2. Prune dangling images only (so ephemeral tool images & standby images are preserved)
+  echo "Pruning dangling images..."
   local img_res
-  img_res=$(curl -s -k -X POST \
+  img_res=$(curl -s -k -L -X POST \
     -H "X-API-Key: ${token}" \
-    "${base_url}/api/endpoints/${endpoint_id}/docker/images/prune?filters=%7B%22dangling%22%3A%5B%22false%22%5D%7D" 2>&1 || true)
+    "${base_url}/api/endpoints/${endpoint_id}/docker/images/prune?filters=%7B%22dangling%22%3A%5B%22true%22%5D%7D" 2>&1 || true)
   echo "ℹ Image prune response: ${img_res}"
 
   # 3. Prune build cache
   echo "Pruning build cache..."
-  curl -s -k -X POST \
+  curl -s -k -L -X POST \
     -H "X-API-Key: ${token}" \
     "${base_url}/api/endpoints/${endpoint_id}/docker/build/prune" >/dev/null 2>&1 || true
 }
@@ -54,7 +54,7 @@ prune_portainer_endpoint() {
 # 1. Prune MTCD Portainer
 prune_portainer_endpoint \
   "MTCD Synology" \
-  "${MTCD_PORTAINER_URL:-https://docker.server.mtcd.org}" \
+  "${MTCD_PORTAINER_URL:-https://docker.mtcd.org}" \
   "${MTCD_PORTAINER_TOKEN:-ptr_caKh16OVXC+3G4shu9s7TXtumDZY04R6wwaOYkq+Pls=}" \
   "${MTCD_PORTAINER_ENDPOINT_ID:-2}"
 

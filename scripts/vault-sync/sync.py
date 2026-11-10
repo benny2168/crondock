@@ -29,7 +29,7 @@ logging.basicConfig(
 logger = logging.getLogger("vault-sync")
 
 # Environment configuration
-MTCD_URL = os.getenv("MTCD_URL", "https://pw.server.mtcd.org").rstrip("/")
+MTCD_URL = os.getenv("MTCD_URL", "https://pw.mtcd.org").rstrip("/")
 MTCD_EMAIL = os.getenv("MTCD_EMAIL", "tech@mtcd.org")
 MTCD_CLIENT_ID = os.getenv("MTCD_CLIENT_ID", "")
 MTCD_CLIENT_SECRET = os.getenv("MTCD_CLIENT_SECRET", "")
@@ -107,9 +107,15 @@ def authenticate_and_unlock(name, app_dir, server_url, email, client_id, client_
     os.makedirs(app_dir, exist_ok=True)
     logger.info(f"Connecting to {name} ({server_url}) as {email}...")
 
-    # Set server URL
+    # Set server URL (if changing servers, must log out of existing session first)
     status = get_status(app_dir)
     if status.get("serverUrl") != server_url:
+        if status.get("status") != "unauthenticated":
+            logger.info(f"Logging out of previous server ({status.get('serverUrl')}) on {name} before switching URL...")
+            try:
+                run_bw_raw(app_dir, ["logout"])
+            except Exception:
+                pass
         logger.info(f"Setting server URL for {name} to {server_url}")
         run_bw_raw(app_dir, ["config", "server", server_url])
         status = get_status(app_dir)

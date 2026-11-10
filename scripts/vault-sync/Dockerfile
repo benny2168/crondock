@@ -1,4 +1,4 @@
-FROM node:lts-slim
+FROM node:22-slim
 
 LABEL org.opencontainers.image.title="Vaultwarden Multi-Instance Sync"
 LABEL org.opencontainers.image.description="Sync items, TOTP, and Passkeys between Vaultwarden instances"

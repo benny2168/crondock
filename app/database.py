@@ -104,7 +104,7 @@ def seed_defaults():
             ("ABRAHAM_SYNOLOGY_ENDPOINT_ID",   "5",                                                    "Abraham Synology Docker endpoint ID",  False),
             ("ABRAHAM_MACMINI_ENDPOINT_ID",    "3",                                                    "Abraham Mac Mini Docker endpoint ID",  False),
             ("ABRAHAM_PORTAINER_ENDPOINT_ID",   "5",                                                    "Legacy Abraham Docker endpoint ID",    False),
-            ("MTCD_PORTAINER_URL",              "https://docker.server.mtcd.org",                       "MTCD Portainer base URL",              False),
+            ("MTCD_PORTAINER_URL",              "https://docker.mtcd.org",                              "MTCD Portainer base URL",              False),
             ("MTCD_PORTAINER_TOKEN",            "ptr_caKh16OVXC+3G4shu9s7TXtumDZY04R6wwaOYkq+Pls=",   "MTCD Portainer API token",              True),
             ("MTCD_PORTAINER_ENDPOINT_ID",      "2",                                                    "MTCD Synology Docker endpoint ID",     False),
             ("API_KEY",                         "",                                                     "API token for programmatic job/setting management via X-API-Key header. Set this to a random 32+ character string; leave empty to disable API auth.", True),

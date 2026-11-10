@@ -15,8 +15,8 @@ services:
       - LOGIN_PROVIDER_NAME=MTCD Login
       - OIDC_CLIENT_ID=${OIDC_CLIENT_ID}
       - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
-      - OIDC_DISCOVERY_URL=https://auth.server.mtcd.org/application/o/crondock/.well-known/openid-configuration
-      - OIDC_REDIRECT_URI=https://cron.server.mtcd.org/auth/callback
+      - OIDC_DISCOVERY_URL=https://auth.mtcd.org/application/o/crondock/.well-known/openid-configuration
+      - OIDC_REDIRECT_URI=https://cron.mtcd.org/auth/callback
       # ── Session ─────────────────────────────────────────────────────────
       - SESSION_SECRET=${SESSION_SECRET}
       - IAM_API_KEY=cd_qKGHxH9uPzHyJyV7PtbD9hpHUWuHC2Tq3P4iWIzANsA

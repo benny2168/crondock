@@ -25,10 +25,16 @@ echo "[$STAMP] Using config: $CTR_ENV"
 
 mkdir -p /data/vault-sync/bw-data
 
+# Auto-build vw-sync:latest if pruned or missing locally
+if ! docker image inspect vw-sync:latest >/dev/null 2>&1; then
+  echo "[$(date '+%Y-%m-%d %H:%M:%S')] Image vw-sync:latest not found locally — building from /data/vault-sync..."
+  docker build -t vw-sync:latest /data/vault-sync
+fi
+
 # Run the sync container:
 docker run --rm \
   --env-file "$CTR_ENV" \
   -v "$HOST_DATA:/bw-data" \
   vw-sync:latest
 
-echo "[$STAMP] === vw-sync complete ==="
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] === vw-sync complete ==="

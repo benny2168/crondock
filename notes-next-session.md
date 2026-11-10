@@ -1,5 +1,15 @@
 # Notes for Next Session — CronDock
 
+## Recently Completed (2026-11-09)
+**MTCD Domain Migration & Vaultwarden Sync Self-Healing Fixes (v1.4.1)**:
+- **MTCD Portainer Cleanups (Jobs #10 & #11)**:
+  - Updated `MTCD_PORTAINER_URL` in CronDock `settings` (and seed defaults in `app/database.py` + `scripts/docker-cleanup.sh`) from `https://docker.server.mtcd.org` to `https://docker.mtcd.org`, resolving `HTTP 301 Moved Permanently` failures on `POST` requests.
+- **Vaultwarden Sync (Job #9)**:
+  - Updated `MTCD_URL` from `https://pw.server.mtcd.org` to `https://pw.mtcd.org` across `vault-sync.env` and `scripts/vault-sync/sync.py`.
+  - Updated `authenticate_and_unlock` in `scripts/vault-sync/sync.py` to log out before running `bw config server` when switching server URLs.
+  - Added self-healing `docker image inspect vw-sync:latest` check in `vw-sync.sh` to automatically build `vw-sync:latest` from `/data/vault-sync` if ever pruned/missing locally, and updated local host `crontab` cleanup script (`~/Antigravity/scripts/docker-cleanup.sh`) to `dangling=true` so ephemeral/standby images are preserved.
+  - Verified all 11 jobs in CronDock (`#1, #3, #4, #5, #6, #7, #8, #9, #10, #11, #12`) are enabled and green (`last_run_success = True`).
+
 ## Recently Completed (2026-10-03)
 **In-Browser Script Manager with Syntax Correction (v1.4.0)**:
 - **Full In-Browser Script Management**: Implemented dedicated `📜 Scripts` section with card view, metadata (size, timestamps, permissions 0755), search filter, and cross-referenced job linkages.

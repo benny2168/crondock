@@ -1,5 +1,26 @@
 # Change Tracker — CronDock
 
+### 2026-11-09 — v1.4.1: Fix Failed MTCD & Abraham Cron Jobs (Jobs #9, #10, #11)
+- **Issues**:
+  1. **Job #9 (`Vaultwarden Sync (MTCD <-> Abraham)`)**: Failed with `exit_code = 125` (`Unable to find image 'vw-sync:latest' locally`). Additionally, `pw.server.mtcd.org` was migrated to `pw.mtcd.org` with an `HTTP 301 Moved Permanently` redirect.
+  2. **Job #10 (`Docker Containers Cleanup — MTCD Synology`) & Job #11 (`Docker Images Cleanup — MTCD Synology`)**: Failed with `exit_code = 301` (`HTTP 301 Moved Permanently` from openresty).
+- **Root Causes**:
+  1. Prior to the Nov 8 `dangling=true` update, `dangling=false` image pruning deleted the local `vw-sync:latest` image because `vw-sync.sh` executes it ephemerally via `docker run --rm`. `vw-sync.sh` had no fallback to rebuild the image if missing.
+  2. All `*.server.mtcd.org` domains (`docker.server.mtcd.org`, `pw.server.mtcd.org`) now return `HTTP 301 Moved Permanently` to `*.mtcd.org`. `MTCD_PORTAINER_URL` in CronDock `settings` and `MTCD_URL` in `vault-sync.env` still pointed to `.server.mtcd.org`, causing HTTP `POST` prune requests in Jobs #10 and #11 to fail with HTTP 301.
+  3. In `scripts/vault-sync/sync.py`, changing `MTCD_URL` on an already-logged-in Bitwarden CLI cache directory attempted `bw config server` before `bw logout`, and `FROM node:lts-slim` had floated to Node 26 where `@bitwarden/cli@2026.8.0` requires Node 22.
+- **Fixes**:
+  1. Updated `MTCD_PORTAINER_URL` in CronDock `settings` (and `app/database.py` seed defaults + `scripts/docker-cleanup.sh`) to `https://docker.mtcd.org`.
+  2. Updated `MTCD_URL` to `https://pw.mtcd.org` in `/data/scripts/vault-sync.env`, `/data/vault-sync/vault-sync.env`, `scripts/vault-sync/vault-sync.env.example`, and `scripts/vault-sync/sync.py`.
+  3. Updated `scripts/vault-sync/sync.py` to log out before switching server URLs, pinned `scripts/vault-sync/Dockerfile` to `node:22-slim`, and staged `Dockerfile` + `sync.py` in `/data/vault-sync/`.
+  4. Updated `vw-sync.sh` to automatically build `vw-sync:latest` from `/data/vault-sync` if the image is ever missing locally, and updated the host Mac `crontab` script (`~/Antigravity/scripts/docker-cleanup.sh`) from `dangling=false` to `dangling=true`.
+  5. Synced the NVMe-updated standby scripts (`vw-restore-standby.sh` and `npm-sync-standby.sh`) into `scripts/abraham/`, bumped CronDock to `v1.4.1`, and deployed `benny2168/crondock:1.4.1`.
+- **Validation**:
+  - Health endpoint `https://cron.abraham16.com/api/health` verified returning `{"ok":true,"version":"1.4.1"}`.
+  - Triggered Job #10 (`POST /api/jobs/10/run`): Log #2165 succeeded (`HTTP 200`, `success=True`).
+  - Triggered Job #11 (`POST /api/jobs/11/run`): Log #2166 succeeded (`HTTP 200`, `success=True`).
+  - Triggered Job #9 (`POST /api/jobs/9/run`): Synchronized 3 created and 20 updated items across MTCD and Abraham on pass 1, and verified Log #2168 succeeded on pass 2 (`exit_code=0`, `0 created, 0 updated, 37 unchanged`, `success=True`).
+  - All 11 active jobs in CronDock verified enabled and `last_run_success = True`.
+
 ### 2026-10-03 — v1.4.0: In-Browser Script Manager with Syntax Correction
 - **Feature**: Implemented full in-browser script management enabling users to upload, view, edit (with automated syntax correction), test-run, and save shell and Python scripts directly from the CronDock web interface.
 - **Backend Implementation**:

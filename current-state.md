@@ -3,7 +3,7 @@
 ## Architecture & Overview
 - **Service**: CronDock — Visual cron job manager with web UI
 - **Active Repository**: `mtcdtech/crondock` (canonical repository, `main` branch)
-- **Active Version**: `1.4.0`
+- **Active Version**: `1.4.1`
 - **Deployment Target**: Ben-Mac-Mini (Abraham Portainer endpoint 3)
 - **Public URL**: `https://cron.abraham16.com`
 - **Authentication**: Authentik SSO OIDC (`https://auth.abraham16.com`) + Programmatic API Token (`X-API-Key` header)
@@ -30,10 +30,14 @@
   2. `Docker Images Cleanup — Abraham Synology` (`35 3 * * *`): Prunes dangling/unused images on Abraham Synology NAS (Endpoint 5).
   3. `Docker Containers Cleanup — Mac Mini` (`40 3 * * *`): Prunes stopped/unused containers on Ben-Mac-Mini (Endpoint 3) — **Enabled & Verified**.
   4. `Docker Images Cleanup — Mac Mini` (`45 3 * * *`): Prunes dangling/unused images on Ben-Mac-Mini (Endpoint 3) — **Enabled & Verified**.
-- **Container**: `benny2168/crondock:1.3.3` running with mounts for `/data`, `/var/run/docker.sock`, `/root/.ssh` (id_ed25519 + known_hosts), `/host-backups`, `/nginx-proxy-src/data`, and `/nginx-proxy-src/letsencrypt`.
-- **Validation**: All 7 jobs tested, enabled, and verified green (`last_run_success = 1`) in production.
+- **Container**: `benny2168/crondock:1.4.1` running with mounts for `/data`, `/var/run/docker.sock`, `/root/.ssh` (id_ed25519 + known_hosts), `/host-backups`, `/nginx-proxy-src/data`, and `/nginx-proxy-src/letsencrypt`.
+- **Validation**: All 11 active jobs (Abraham + MTCD) tested, enabled, and verified green (`last_run_success = 1`) in production.
 - **Multi-Instance Vaultwarden Sync Active**:
-  - **Job #9: Vaultwarden Sync (MTCD <-> Abraham)** (`*/15 * * * *`): Synchronizes logins, TOTP 2FA seeds, and Passkeys (FIDO2 credentials) between `pw.server.mtcd.org` (`tech@mtcd.org`, folder `Sync to Abraham`) and `pw.abraham16.com` (`ben@abraham16.com`, folder `Sync to Abraham`).
-  - **Engine**: Dedicated `vw-sync:latest` container (Node.js LTS, `@bitwarden/cli 2026.9.1`, Python 3 dateutil).
+  - **Job #9: Vaultwarden Sync (MTCD <-> Abraham)** (`0 3 * * *`): Synchronizes logins, TOTP 2FA seeds, and Passkeys (FIDO2 credentials) between `pw.mtcd.org` (`tech@mtcd.org`, folders `Sync to Abraham` / `Sync from Abraham`) and `pw.abraham16.com` (`ben@abraham16.com`, folders `Sync to MTCD` / `Sync from MTCD`).
+  - **Engine**: Dedicated `vw-sync:latest` container (`node:22-slim`, `@bitwarden/cli 2026.8.0`, Python 3 dateutil) with automatic self-healing build in `vw-sync.sh` from `/data/vault-sync/` if image is ever missing locally.
   - **Persistence & Isolation**: Separate session cache under `/data/vault-sync/bw-data/{mtcd,abraham}` using `BITWARDENCLI_APPDATA_DIR`.
-  - **Config**: `/data/vault-sync/vault-sync.env` (permissions 600).
+  - **Config**: `/data/scripts/vault-sync.env` and `/data/vault-sync/vault-sync.env` (permissions 600).
+- **MTCD Synology Docker Cleanups Active**:
+  - **Job #10: Docker Containers Cleanup — MTCD Synology** (`50 3 * * *`): Prunes stopped/unused containers on MTCD Synology NAS (Endpoint 2 via `https://docker.mtcd.org`).
+  - **Job #11: Docker Images Cleanup — MTCD Synology** (`55 3 * * *`): Prunes dangling images on MTCD Synology NAS (Endpoint 2 via `https://docker.mtcd.org`).
+  - **Job #12: Docker Full Cleanup Script** (`45 3 * * *`): Runs `/data/scripts/docker-cleanup.sh` across MTCD Synology, Abraham Synology, and Mac Mini endpoints (excluding standby-labeled containers and preserving non-dangling tool images).
