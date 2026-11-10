@@ -1,13 +1,16 @@
 import logging
 import os
 import secrets
+from pathlib import Path
 from urllib.parse import quote
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from typing import List, Optional
 
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -22,7 +25,8 @@ from auth import (
 )
 
 LOGIN_PROVIDER_NAME = os.getenv("LOGIN_PROVIDER_NAME", "Authentik SSO" if AUTH_PROVIDER == "oidc" else "Synology SSO")
-APP_VERSION = "1.4.1"
+APP_VERSION = "1.4.2"
+SECRET_MASK = "••••••••••••"
 from database import Job, JobLog, SessionLocal, Setting, init_db, seed_defaults
 from models import (
     JobCreate, JobLogResponse, JobResponse, JobUpdate,
@@ -45,8 +49,19 @@ logger = logging.getLogger(__name__)
 
 # ── Public paths (no auth required) ──────────────────────────────────────────
 
-_PUBLIC = {"/login", "/auth/start", "/auth/callback", "/auth/logout", "/api/health", "/api/iam/roles"}
+_PUBLIC = {"/login", "/auth/start", "/auth/callback", "/auth/logout", "/api/health", "/api/iam/roles", "/robots.txt", "/sitemap.xml"}
 _PUBLIC_PREFIXES = ("/static",)
+
+
+def _add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'",
+    )
+    return response
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -55,24 +70,24 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
         # Allow public paths
         if path in _PUBLIC or any(path.startswith(p) for p in _PUBLIC_PREFIXES):
-            return await call_next(request)
+            return _add_security_headers(await call_next(request))
 
         # Check API key header for programmatic /api/* access
         if path.startswith("/api"):
             api_key = request.headers.get("X-API-Key")
             if api_key and verify_api_key(api_key):
                 request.state.user = {"api": True, "name": "api-token"}
-                return await call_next(request)
+                return _add_security_headers(await call_next(request))
 
         user = get_session(request)
 
         if not user:
             if path.startswith("/api"):
-                return JSONResponse({"detail": "Not authenticated"}, status_code=401)
-            return RedirectResponse("/login", status_code=302)
+                return _add_security_headers(JSONResponse({"detail": "Not authenticated"}, status_code=401))
+            return _add_security_headers(RedirectResponse("/login", status_code=302))
 
         request.state.user = user
-        return await call_next(request)
+        return _add_security_headers(await call_next(request))
 
 
 # ── App lifecycle ─────────────────────────────────────────────────────────────
@@ -96,7 +111,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="CronDock", version=APP_VERSION, lifespan=lifespan)
 app.add_middleware(AuthMiddleware)
-templates = Jinja2Templates(directory="static")
+templates = Jinja2Templates(directory=str(STATIC_DIR))
 
 
 def get_db():
@@ -183,23 +198,29 @@ async def logout():
 
 @app.get("/api/me")
 async def me(request: Request):
-    user = get_session(request)
+    """Return the current user's display info from their session or API token."""
+    user = get_session(request) or getattr(request.state, "user", None)
     if not user:
         raise HTTPException(401, "Not authenticated")
-    return user
+    return {
+        "name":     user.get("name") or user.get("username", ""),
+        "email":    user.get("email", ""),
+        "username": user.get("username", ""),
+    }
 
 
 # ── Jobs ───────────────────────────────────────────────────────────────────────
 
+def _to_job_response(job: Job) -> JobResponse:
+    jr = JobResponse.model_validate(job)
+    jr.next_run_at = scheduler_manager.get_next_run(job.id)
+    return jr
+
+
 @app.get("/api/jobs", response_model=List[JobResponse])
 def list_jobs(db: Session = Depends(get_db)):
     jobs = db.query(Job).order_by(Job.created_at).all()
-    result = []
-    for job in jobs:
-        jr = JobResponse.model_validate(job)
-        jr.next_run_at = scheduler_manager.get_next_run(job.id)
-        result.append(jr)
-    return result
+    return [_to_job_response(job) for job in jobs]
 
 
 @app.post("/api/jobs", response_model=JobResponse, status_code=201)
@@ -210,9 +231,7 @@ def create_job(data: JobCreate, db: Session = Depends(get_db)):
     db.refresh(job)
     if job.enabled:
         scheduler_manager.enable_job(job.id, job.schedule)
-    jr = JobResponse.model_validate(job)
-    jr.next_run_at = scheduler_manager.get_next_run(job.id)
-    return jr
+    return _to_job_response(job)
 
 
 @app.get("/api/jobs/{job_id}", response_model=JobResponse)
@@ -220,9 +239,7 @@ def get_job(job_id: int, db: Session = Depends(get_db)):
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(404, "Job not found")
-    jr = JobResponse.model_validate(job)
-    jr.next_run_at = scheduler_manager.get_next_run(job.id)
-    return jr
+    return _to_job_response(job)
 
 
 @app.put("/api/jobs/{job_id}", response_model=JobResponse)
@@ -239,9 +256,7 @@ def update_job(job_id: int, data: JobUpdate, db: Session = Depends(get_db)):
         scheduler_manager.enable_job(job.id, job.schedule)
     else:
         scheduler_manager.disable_job(job.id)
-    jr = JobResponse.model_validate(job)
-    jr.next_run_at = scheduler_manager.get_next_run(job.id)
-    return jr
+    return _to_job_response(job)
 
 
 @app.delete("/api/jobs/{job_id}")
@@ -277,16 +292,27 @@ def get_logs(job_id: int, limit: int = 50, db: Session = Depends(get_db)):
 
 # ── Settings ───────────────────────────────────────────────────────────────────
 
+def _to_setting_response(s: Setting) -> SettingResponse:
+    sr = SettingResponse.model_validate(s)
+    if sr.is_secret and sr.value:
+        sr.value = SECRET_MASK
+    return sr
+
+
 @app.get("/api/settings", response_model=List[SettingResponse])
 def list_settings(db: Session = Depends(get_db)):
-    return db.query(Setting).order_by(Setting.key).all()
+    rows = db.query(Setting).order_by(Setting.key).all()
+    return [_to_setting_response(s) for s in rows]
 
 
 @app.post("/api/settings", response_model=SettingResponse)
 def upsert_setting(data: SettingCreate, db: Session = Depends(get_db)):
     setting = db.query(Setting).filter(Setting.key == data.key).first()
     if setting:
-        for field, value in data.model_dump().items():
+        payload = data.model_dump()
+        if payload.get("value") == SECRET_MASK and setting.is_secret:
+            payload["value"] = setting.value
+        for field, value in payload.items():
             setattr(setting, field, value)
         setting.updated_at = datetime.utcnow()
     else:
@@ -294,7 +320,7 @@ def upsert_setting(data: SettingCreate, db: Session = Depends(get_db)):
         db.add(setting)
     db.commit()
     db.refresh(setting)
-    return setting
+    return _to_setting_response(setting)
 
 
 @app.delete("/api/settings/{key}")
@@ -407,10 +433,11 @@ def check_script_syntax(data: ScriptCheckSyntaxRequest):
 
 
 @app.post("/api/scripts/{filename}/test-run", response_model=ScriptTestRunResponse)
-def run_script_test(filename: str, timeout: int = 30):
+def run_script_test(filename: str, timeout: int = 30, db: Session = Depends(get_db)):
     """Test-run a script with live output and duration capture."""
     try:
-        return test_run_script(filename, timeout=min(timeout, 120))
+        settings_env = {s.key: s.value for s in db.query(Setting).all()}
+        return test_run_script(filename, timeout=min(timeout, 120), extra_env=settings_env)
     except FileNotFoundError:
         raise HTTPException(404, f"Script '{filename}' not found")
     except ValueError as e:
@@ -433,7 +460,6 @@ def health():
 def get_timeline(days: int = 60, db: Session = Depends(get_db)):
     """Return past run logs + upcoming scheduled runs for the Timeline view."""
     # ── Past runs ──────────────────────────────────────────────────────────
-    from sqlalchemy import text
     rows = (
         db.query(JobLog, Job)
         .join(Job, JobLog.job_id == Job.id)
@@ -443,9 +469,6 @@ def get_timeline(days: int = 60, db: Session = Depends(get_db)):
     )
     past = []
     for log, job in rows:
-        dur = None
-        if log.started_at and log.finished_at:
-            dur = int((log.finished_at - log.started_at).total_seconds() * 1000)
         past.append({
             "id":          log.id,
             "job_id":      log.job_id,
@@ -454,7 +477,7 @@ def get_timeline(days: int = 60, db: Session = Depends(get_db)):
             "finished_at": log.finished_at.isoformat() if log.finished_at else None,
             "success":     log.success,
             "exit_code":   log.exit_code,
-            "duration_ms": dur,
+            "duration_ms": log.duration_ms,
             "output":      log.output or "",
         })
 
@@ -485,18 +508,6 @@ def get_timeline(days: int = 60, db: Session = Depends(get_db)):
     upcoming.sort(key=lambda x: x["scheduled_at"])
     return {"past": past, "upcoming": upcoming}
 
-
-@app.get("/api/me")
-def me(request: Request):
-    """Return the current user's display info from their session."""
-    user = get_session(request)
-    if not user:
-        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
-    return {
-        "name":     user.get("name") or user.get("username", ""),
-        "email":    user.get("email", ""),
-        "username": user.get("username", ""),
-    }
 
 # ── IAM Integration API ──────────────────────────────────────────────────────────
 
@@ -534,14 +545,26 @@ def iam_key(request: Request):
 
 # ── Static / SPA ─────────────────────────────────────────────────────────────────
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+def robots_txt():
+    return "User-agent: *\nDisallow: /\n"
+
+
+@app.get("/sitemap.xml")
+def sitemap_xml():
+    return JSONResponse({"detail": "Not found"}, status_code=404)
 
 
 @app.get("/")
 async def root(request: Request):
-    return FileResponse("static/index.html")
+    return FileResponse(str(STATIC_DIR / "index.html"))
 
 
 @app.get("/{full_path:path}")
 async def spa_fallback(full_path: str):
-    return FileResponse("static/index.html")
+    if full_path.startswith("api/"):
+        return JSONResponse({"detail": "Not found"}, status_code=404)
+    return FileResponse(str(STATIC_DIR / "index.html"))

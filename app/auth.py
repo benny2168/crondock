@@ -1,5 +1,4 @@
 import base64
-import hashlib
 import json
 import os
 import secrets
@@ -153,7 +152,7 @@ async def exchange_code(code: str) -> dict:
     loop = asyncio.get_event_loop()
     resp = await loop.run_in_executor(None, _do_post)
 
-    _log.info(f"Token response: HTTP {resp.status_code} — {resp.text[:500]}")
+    _log.info(f"Token response: HTTP {resp.status_code}")
     resp.raise_for_status()
     data = resp.json()
     if "error" in data:

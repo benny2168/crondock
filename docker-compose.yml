@@ -5,29 +5,34 @@ services:
     container_name: crondock
     restart: unless-stopped
     ports:
-      - "3900:8000"
+      - "${CRONDOCK_PORT:-3900}:8000"
     volumes:
-      - /Users/benny2168/Dockers/crondock/data:/data
+      - ${CRONDOCK_DATA_DIR:-/Users/benny2168/Dockers/crondock/data}:/data
       - /var/run/docker.sock:/var/run/docker.sock
-      - /Users/benny2168/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro
-      - /Users/benny2168/.ssh/known_hosts:/root/.ssh/known_hosts:ro
-      - /Users/benny2168/Dockers/backups:/host-backups
-      - /Users/benny2168/Dockers/nginx-proxy-data:/nginx-proxy-src/data:ro
-      - /Users/benny2168/Dockers/nginx-proxy-letsencrypt:/nginx-proxy-src/letsencrypt:ro
+      - ${SSH_PRIVATE_KEY_PATH:-/Users/benny2168/.ssh/id_ed25519}:/root/.ssh/id_ed25519:ro
+      - ${SSH_KNOWN_HOSTS_PATH:-/Users/benny2168/.ssh/known_hosts}:/root/.ssh/known_hosts:ro
+      - ${HOST_BACKUPS_DIR:-/Users/benny2168/Dockers/backups}:/host-backups
+      - ${NPM_DATA_SRC_DIR:-/Users/benny2168/Dockers/nginx-proxy-data}:/nginx-proxy-src/data:ro
+      - ${NPM_LETSENCRYPT_SRC_DIR:-/Users/benny2168/Dockers/nginx-proxy-letsencrypt}:/nginx-proxy-src/letsencrypt:ro
     environment:
-      - TZ=America/Chicago
-      - DATA_DIR=/data
+      - TZ=${TZ:-America/Chicago}
+      - DATA_DIR=${DATA_DIR:-/data}
       # ── Auth provider (Authentik) ─────────────────────────────────────────
-      - AUTH_PROVIDER=oidc
-      - LOGIN_PROVIDER_NAME=Authentik SSO
-      - OIDC_CLIENT_ID=75b62448073fff0a11a266448ee9d3a9b36df787
-      - OIDC_CLIENT_SECRET=lLCNKGLN7UB_eZiQ0L20vGM2iHkCPgy6MEqBL9uEMg43X8FhOEa4ChyDTxj-_PIM
-      - OIDC_DISCOVERY_URL=https://auth.abraham16.com/application/o/crondock/.well-known/openid-configuration
-      - OIDC_REDIRECT_URI=https://cron.abraham16.com/auth/callback
+      - AUTH_PROVIDER=${AUTH_PROVIDER:-oidc}
+      - LOGIN_PROVIDER_NAME=${LOGIN_PROVIDER_NAME:-Authentik SSO}
+      - OIDC_CLIENT_ID=${OIDC_CLIENT_ID}
+      - OIDC_CLIENT_SECRET=${OIDC_CLIENT_SECRET}
+      - OIDC_DISCOVERY_URL=${OIDC_DISCOVERY_URL:-https://auth.abraham16.com/application/o/crondock/.well-known/openid-configuration}
+      - OIDC_REDIRECT_URI=${OIDC_REDIRECT_URI:-https://cron.abraham16.com/auth/callback}
       # ── Session ───────────────────────────────────────────────────────────
-      - SESSION_SECRET=76d2a63f17d652601113e968aca6f4d613ba55941b5ec98f34f777ed76ebda42
-      - SESSION_COOKIE_NAME=crondock_session
-      - SESSION_MAX_AGE_HOURS=24
+      - SESSION_SECRET=${SESSION_SECRET}
+      - SESSION_COOKIE_NAME=${SESSION_COOKIE_NAME:-crondock_session}
+      - SESSION_MAX_AGE_HOURS=${SESSION_MAX_AGE_HOURS:-24}
+      # ── Seed / Integration Defaults ───────────────────────────────────────
+      - ABRAHAM_PORTAINER_URL=${ABRAHAM_PORTAINER_URL:-https://docker.abraham16.com}
+      - ABRAHAM_PORTAINER_TOKEN=${ABRAHAM_PORTAINER_TOKEN:-}
+      - MTCD_PORTAINER_URL=${MTCD_PORTAINER_URL:-https://docker.mtcd.org}
+      - MTCD_PORTAINER_TOKEN=${MTCD_PORTAINER_TOKEN:-}
     networks:
       - default
       - proxynet
@@ -35,4 +40,3 @@ services:
 networks:
   proxynet:
     external: true
-

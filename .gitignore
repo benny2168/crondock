@@ -2,10 +2,17 @@ data/
 __pycache__/
 *.pyc
 *.pyo
+*.db
+*.sqlite
+*.log
 .env
-.DS_Store
-
-# Abraham secrets — never commit
-.env.abraham
-.env.abraham.*
+.env.*
+!.env.example
 !.env.abraham.example
+.DS_Store
+ui-audit-results/
+playwright-report/
+.playwright/
+test-results/
+.coverage
+htmlcov/

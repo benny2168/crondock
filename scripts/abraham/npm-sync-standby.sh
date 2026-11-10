@@ -5,9 +5,9 @@ set -euo pipefail
 LOG_DIR="/host-backups/nginx-proxy-standby"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/sync.log"
-PORTAINER_TOK="ptr_LAYVFvw5+DscmC2s2QsM+5aeO6iXGYcR4+KwjH7f/eU="
-PORTAINER_URL="${PORTAINER_URL:-https://docker.abraham16.com}"
-SYNO_HOST="ben@100.91.132.90"
+PORTAINER_TOK="${ABRAHAM_PORTAINER_TOKEN:-}"
+PORTAINER_URL="${ABRAHAM_PORTAINER_URL:-${PORTAINER_URL:-https://docker.abraham16.com}}"
+SYNO_HOST="${SYNO_HOST:-ben@100.91.132.90}"
 SSH_CMD="ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 
 # Helper for current timestamp

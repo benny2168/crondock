@@ -6,7 +6,7 @@ import stat
 import subprocess
 import time
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from database import DATA_DIR, Job
 
@@ -51,6 +51,16 @@ def detect_script_type(filename: str, content: str = "") -> str:
     return "shell"
 
 
+def _find_linked_jobs(script_name: str, jobs: List[Job]) -> List[Dict[str, Any]]:
+    """Return job summaries referencing the given script filename."""
+    linked = []
+    for j in jobs:
+        cmd = j.command or ""
+        if script_name in cmd or f"/data/scripts/{script_name}" in cmd:
+            linked.append({"id": j.id, "name": j.name, "enabled": j.enabled})
+    return linked
+
+
 def list_scripts(db) -> List[Dict[str, Any]]:
     """Scan SCRIPTS_DIR and cross-reference with jobs referencing each script."""
     os.makedirs(SCRIPTS_DIR, exist_ok=True)
@@ -84,13 +94,7 @@ def list_scripts(db) -> List[Dict[str, Any]]:
                 pass
 
             script_type = detect_script_type(entry, peek)
-
-            # Match associated jobs referencing this script
-            linked_jobs = []
-            for j in all_jobs:
-                cmd = j.command or ""
-                if entry in cmd or f"/data/scripts/{entry}" in cmd:
-                    linked_jobs.append({"id": j.id, "name": j.name, "enabled": j.enabled})
+            linked_jobs = _find_linked_jobs(entry, all_jobs)
 
             scripts.append({
                 "name": entry,
@@ -123,14 +127,7 @@ def get_script_detail(filename: str, db) -> Dict[str, Any]:
         content = f.read()
 
     script_type = detect_script_type(name, content)
-
-    # Linked jobs
-    all_jobs = db.query(Job).all()
-    linked_jobs = []
-    for j in all_jobs:
-        cmd = j.command or ""
-        if name in cmd or f"/data/scripts/{name}" in cmd:
-            linked_jobs.append({"id": j.id, "name": j.name, "enabled": j.enabled})
+    linked_jobs = _find_linked_jobs(name, db.query(Job).all())
 
     return {
         "name": name,
@@ -333,7 +330,7 @@ def check_and_correct_syntax(
     }
 
 
-def test_run_script(filename: str, timeout: int = 30) -> Dict[str, Any]:
+def test_run_script(filename: str, timeout: int = 30, extra_env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Execute a script in a test execution subshell with real-time output capture."""
     name = sanitize_filename(filename)
     path = get_script_path(name)
@@ -352,6 +349,12 @@ def test_run_script(filename: str, timeout: int = 30) -> Dict[str, Any]:
     else:
         cmd = ["/bin/bash", path]
 
+    run_env = os.environ.copy()
+    if extra_env:
+        for k, v in extra_env.items():
+            if k and v is not None:
+                run_env[str(k)] = str(v)
+
     start_time = time.time()
     try:
         proc = subprocess.run(
@@ -360,6 +363,7 @@ def test_run_script(filename: str, timeout: int = 30) -> Dict[str, Any]:
             text=True,
             timeout=timeout,
             cwd=SCRIPTS_DIR,
+            env=run_env,
         )
         duration_ms = int((time.time() - start_time) * 1000)
         output = (proc.stdout + proc.stderr).strip()

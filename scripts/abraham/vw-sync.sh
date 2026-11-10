@@ -16,7 +16,7 @@ else
   exit 1
 fi
 
-HOST_DATA="/Users/benny2168/Dockers/crondock/data/vault-sync/bw-data"
+HOST_DATA="${VW_SYNC_HOST_DATA:-/Users/benny2168/Dockers/crondock/data/vault-sync/bw-data}"
 
 # Stream output to persistent log and stdout so CronDock captures execution logs
 exec 1> >(tee -a "$LOG") 2>&1

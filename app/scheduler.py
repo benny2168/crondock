@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import subprocess
 import time
 from datetime import datetime
@@ -44,9 +45,13 @@ def _format_http_body(text: str) -> str:
 
 def _run_shell(command: str, settings: dict):
     cmd = _substitute(command, settings)
+    run_env = os.environ.copy()
+    for k, v in settings.items():
+        if k and v is not None:
+            run_env[str(k)] = str(v)
     try:
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, timeout=300
+            cmd, shell=True, capture_output=True, text=True, timeout=300, env=run_env
         )
         output = (result.stdout + result.stderr).strip()
         return output, result.returncode == 0, result.returncode
@@ -79,7 +84,7 @@ def _run_http(method: str, url: str, headers_json: str, body: str, settings: dic
 
     for attempt in range(1, max_attempts + 1):
         try:
-            with httpx.Client(timeout=timeout_val, verify=True) as client:
+            with httpx.Client(timeout=timeout_val, verify=True, follow_redirects=True) as client:
                 resp = client.request(
                     method=(method or "GET").upper(),
                     url=url,

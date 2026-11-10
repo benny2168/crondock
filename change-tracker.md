@@ -1,5 +1,31 @@
 # Change Tracker — CronDock
 
+### 2026-11-09 — v1.4.2: Comprehensive Project Finalization, Security Hardening & Test Suite
+- **Summary**: Executed full `/finalize-project` workflow across the CronDock repository, externalizing all hardcoded secrets, hardening backend API/auth/scheduler modules, polishing UI responsiveness and contrast, formalizing the automated test suite, and releasing `v1.4.2`.
+- **Changes**:
+  1. **Secret Scrubbing & Portability (`docker-compose.yml`, `docker-compose.mtcd.yml`, `app/database.py`, `scripts/`)**:
+     - Externalized `OIDC_CLIENT_SECRET`, `SESSION_SECRET`, `IAM_API_KEY`, `ABRAHAM_PORTAINER_TOKEN`, `MTCD_PORTAINER_TOKEN`, `VW_STANDBY_ADMIN_TOKEN`, `VW_STANDBY_SSO_CLIENT_ID`, and `VW_STANDBY_SSO_CLIENT_SECRET` into `.env` (gitignored) and CronDock's `settings` table.
+     - Created `.env.example` and `.dockerignore`, and updated `.gitignore`.
+     - Updated `_run_shell` (`app/scheduler.py`) and `test_run_script` (`app/scripts_manager.py`) to inject all CronDock `settings` into the child process environment automatically, and enabled `follow_redirects=True` on HTTP jobs.
+  2. **API & Security Hardening (`app/main.py`, `app/auth.py`, `app/scripts_manager.py`)**:
+     - Masked secret settings (`is_secret=True`) with `••••••••••••` in `GET /api/settings` while preserving underlying values when `••••••••••••` is submitted to `POST /api/settings`.
+     - Added `_add_security_headers()` (`Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`).
+     - Added `/robots.txt` (`200 text/plain`), `/sitemap.xml` (`404`), and `404 JSONResponse` for unknown `/api/*` paths.
+     - Consolidated duplicate `/api/me` endpoints, deduplicated `_find_linked_jobs()` in `app/scripts_manager.py`, and removed raw JWT token response logging in `app/auth.py`.
+  3. **UI Quality & Accessibility (`app/static/index.html`, `app/static/style.css`, `app/static/login.html`, `app/static/app.js`)**:
+     - Fixed `TOOLBAR_MULTI_LINE_WRAP_RISK` on `#script-search-input` and `#tl-filter-job` using responsive flex sizing (`flex: 1 1 0; min-width: 0; width: auto; max-width: 220px`).
+     - Replaced native `confirm()` in `closeScriptEditor()` with inline contextual discard confirmation.
+     - Added dynamic `document.title` and `?section=` URL parameter synchronization in `showSection()`, solid `background-color: #6c63ff` fallbacks on gradient buttons, and WCAG AA contrast improvements (`--muted: #94a3b8`, `--text-dim: #cbd5e1`).
+  4. **Automated Tests & Documentation (`tests/test_crondock.py`, `README.md`, `agent.md`)**:
+     - Created `tests/test_crondock.py` covering health/CSP headers, `/robots.txt`, `/sitemap.xml`, 404 handling, API key auth, secret masking/preservation, Job CRUD, and Script Manager syntax/auto-fix/test-run execution.
+     - Created comprehensive `README.md` and updated `agent.md`.
+- **Validation**:
+  - `node ~/.gemini/config/scripts/audit-security.mjs`: 0 findings.
+  - `node ~/.gemini/config/scripts/audit-ui-static.mjs`: 0 findings.
+  - `node ~/.gemini/config/scripts/audit-pii.mjs`: 0 findings.
+  - `tests/test_crondock.py`: 6/6 tests passing (`OK` in 0.269s).
+  - Live container `crondock` (`benny2168/crondock:1.4.2`) healthy at `https://cron.abraham16.com/api/health` (`{"ok":true,"version":"1.4.2"}`).
+
 ### 2026-11-09 — v1.4.1: Fix Failed MTCD & Abraham Cron Jobs (Jobs #9, #10, #11)
 - **Issues**:
   1. **Job #9 (`Vaultwarden Sync (MTCD <-> Abraham)`)**: Failed with `exit_code = 125` (`Unable to find image 'vw-sync:latest' locally`). Additionally, `pw.server.mtcd.org` was migrated to `pw.mtcd.org` with an `HTTP 301 Moved Permanently` redirect.

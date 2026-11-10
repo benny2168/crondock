@@ -31,6 +31,10 @@ document.addEventListener('DOMContentLoaded', () => {
   startCountdowns();
   // Initialize schedule picker
   window._sp = new SchedulePicker();
+  const initialSection = new URLSearchParams(window.location.search).get('section');
+  if (initialSection && ['jobs', 'scripts', 'timeline', 'settings'].includes(initialSection)) {
+    showSection(initialSection);
+  }
 });
 
 async function loadUser() {
@@ -52,6 +56,14 @@ function showSection(name) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById(`section-${name}`).classList.add('active');
   document.getElementById(`nav-${name}`).classList.add('active');
+  const titles = { jobs: 'Cron Jobs', scripts: 'Scripts', timeline: 'Timeline', settings: 'Settings' };
+  document.title = `CronDock — ${titles[name] || 'Cron Job Manager'}`;
+  if (window.history && window.history.replaceState) {
+    const url = new URL(window.location.href);
+    if (name === 'jobs') url.searchParams.delete('section');
+    else url.searchParams.set('section', name);
+    window.history.replaceState({}, '', url.toString());
+  }
   if (name === 'scripts')   loadScripts();
   if (name === 'settings')  loadSettings();
   if (name === 'timeline')  loadTimeline();
@@ -1500,11 +1512,23 @@ async function openScriptEditor(name) {
   }
 }
 
-function closeScriptEditor(e) {
+let _confirmDiscardScript = false;
+
+function closeScriptEditor(e, forceDiscard = false) {
   if (e && e.target !== document.getElementById('script-editor-overlay')) return;
-  if (_hasUnsavedScriptChanges) {
-    if (!confirm('You have unsaved changes. Discard changes and close?')) return;
+  if (_hasUnsavedScriptChanges && !forceDiscard && !_confirmDiscardScript) {
+    _confirmDiscardScript = true;
+    const badge = document.getElementById('script-unsaved-badge');
+    if (badge) {
+      badge.style.display = 'inline-flex';
+      badge.innerHTML = '⚠️ Unsaved — <span style="text-decoration:underline;cursor:pointer;margin-left:4px;" onclick="closeScriptEditor(null, true)">Click to discard</span>';
+    }
+    toast('Unsaved changes — click Close again or "Click to discard" to close without saving', 'info');
+    setTimeout(() => { _confirmDiscardScript = false; }, 5000);
+    return;
   }
+  _confirmDiscardScript = false;
+  _hasUnsavedScriptChanges = false;
   const overlay = document.getElementById('script-editor-overlay');
   if (overlay) overlay.classList.remove('open');
   closeScriptConsole();

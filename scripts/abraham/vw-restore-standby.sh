@@ -5,9 +5,12 @@ set -euo pipefail
 LOG_DIR="/host-backups/vaultwarden"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/restore.log"
-PORTAINER_TOK="ptr_LAYVFvw5+DscmC2s2QsM+5aeO6iXGYcR4+KwjH7f/eU="
-PORTAINER_URL="${PORTAINER_URL:-https://docker.abraham16.com}"
-SYNO_HOST="ben@100.91.132.90"
+PORTAINER_TOK="${ABRAHAM_PORTAINER_TOKEN:-}"
+PORTAINER_URL="${ABRAHAM_PORTAINER_URL:-${PORTAINER_URL:-https://docker.abraham16.com}}"
+SYNO_HOST="${SYNO_HOST:-ben@100.91.132.90}"
+VW_ADMIN_TOKEN="${VW_STANDBY_ADMIN_TOKEN:-}"
+VW_SSO_CLIENT_ID="${VW_STANDBY_SSO_CLIENT_ID:-}"
+VW_SSO_CLIENT_SECRET="${VW_STANDBY_SSO_CLIENT_SECRET:-}"
 SSH_CMD="ssh -i /root/.ssh/id_ed25519 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR"
 
 # Helper for current timestamp
@@ -52,34 +55,34 @@ $SSH_CMD "$SYNO_HOST" "
 
 # 4. Ensure vaultwarden-standby container exists and restart to reload database
 echo "[$(now)] Ensuring vaultwarden-standby container is running and reloading database..."
-$SSH_CMD "$SYNO_HOST" '
+$SSH_CMD "$SYNO_HOST" "
   if ! sudo /usr/local/bin/docker inspect vaultwarden-standby >/dev/null 2>&1; then
-    echo "Container vaultwarden-standby missing — recreating on Synology NVMe..."
-    sudo /usr/local/bin/docker run -d \
-      --name vaultwarden-standby \
-      --restart unless-stopped \
-      --label com.abraham16.role=standby \
-      -p 5151:80 \
-      -p 3012:3012 \
-      -v /volume2/@docker-standby/vaultwarden-standby/data:/data:rw \
-      -e ROCKET_PORT=80 \
-      -e ROCKET_ADDRESS=0.0.0.0 \
-      -e ROCKET_PROFILE=release \
-      -e DOMAIN=https://pw.abraham16.com \
-      -e '\''ADMIN_TOKEN=$argon2id$v=19$m=65540,t=3,p=4$sCDZmpfjK/CHK3cR+i28v8bObTxnqQLU+pD2HRIW5lI$2Uv6x8v8dVpLfgpO7pLX57r4AANHzHaGIJA62gnZ7wI'\'' \
-      -e SSO_ENABLED=true \
-      -e SSO_ONLY=false \
-      -e SSO_AUTHORITY=https://auth.abraham16.com/application/o/vaultwarden/ \
-      -e SSO_CLIENT_ID=s3rln_MomD4XaFNGPMar2RNPf2bysTXN \
-      -e SSO_CLIENT_SECRET=9mPFd7mZR1n9zDB1TXgdoy-E1hJzo2agXlQ_5FL49J6UAbUwLKu8LA4NVx9D9CAfYfOUzDHpCx3Tzu6taNlf_w \
-      -e '\''SSO_SCOPES=openid profile email'\'' \
-      -e SSO_PKCE=true \
-      -e SSO_SIGNUPS_MATCH_EMAIL=true \
+    echo 'Container vaultwarden-standby missing — recreating on Synology NVMe...'
+    sudo /usr/local/bin/docker run -d \\
+      --name vaultwarden-standby \\
+      --restart unless-stopped \\
+      --label com.abraham16.role=standby \\
+      -p 5151:80 \\
+      -p 3012:3012 \\
+      -v /volume2/@docker-standby/vaultwarden-standby/data:/data:rw \\
+      -e ROCKET_PORT=80 \\
+      -e ROCKET_ADDRESS=0.0.0.0 \\
+      -e ROCKET_PROFILE=release \\
+      -e DOMAIN=https://pw.abraham16.com \\
+      -e 'ADMIN_TOKEN=${VW_ADMIN_TOKEN}' \\
+      -e SSO_ENABLED=true \\
+      -e SSO_ONLY=false \\
+      -e SSO_AUTHORITY=https://auth.abraham16.com/application/o/vaultwarden/ \\
+      -e 'SSO_CLIENT_ID=${VW_SSO_CLIENT_ID}' \\
+      -e 'SSO_CLIENT_SECRET=${VW_SSO_CLIENT_SECRET}' \\
+      -e 'SSO_SCOPES=openid profile email' \\
+      -e SSO_PKCE=true \\
+      -e SSO_SIGNUPS_MATCH_EMAIL=true \\
       vaultwarden/server:latest
   else
     sudo /usr/local/bin/docker restart -t 15 vaultwarden-standby
   fi
-' || \
+" || \
 curl -sS -m 30 -X POST -H "X-API-Key: $PORTAINER_TOK" \
   "$PORTAINER_URL/api/endpoints/5/docker/containers/vaultwarden-standby/restart?t=15" > /dev/null || true
 

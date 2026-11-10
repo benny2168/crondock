@@ -55,20 +55,20 @@ prune_portainer_endpoint() {
 prune_portainer_endpoint \
   "MTCD Synology" \
   "${MTCD_PORTAINER_URL:-https://docker.mtcd.org}" \
-  "${MTCD_PORTAINER_TOKEN:-ptr_caKh16OVXC+3G4shu9s7TXtumDZY04R6wwaOYkq+Pls=}" \
+  "${MTCD_PORTAINER_TOKEN:-}" \
   "${MTCD_PORTAINER_ENDPOINT_ID:-2}"
 
 # 2. Prune Abraham Portainer (if reachable)
 prune_portainer_endpoint \
   "Abraham Synology" \
   "${ABRAHAM_PORTAINER_URL:-https://docker.abraham16.com}" \
-  "${ABRAHAM_PORTAINER_TOKEN:-ptr_LAYVFvw5+DscmC2s2QsM+5aeO6iXGYcR4+KwjH7f/eU=}" \
+  "${ABRAHAM_PORTAINER_TOKEN:-}" \
   "${ABRAHAM_SYNOLOGY_ENDPOINT_ID:-5}"
 
 prune_portainer_endpoint \
   "Mac Mini / OrbStack" \
   "${ABRAHAM_PORTAINER_URL:-https://docker.abraham16.com}" \
-  "${ABRAHAM_PORTAINER_TOKEN:-ptr_LAYVFvw5+DscmC2s2QsM+5aeO6iXGYcR4+KwjH7f/eU=}" \
+  "${ABRAHAM_PORTAINER_TOKEN:-}" \
   "${ABRAHAM_MACMINI_ENDPOINT_ID:-3}"
 
 # 3. Prune local Docker if Docker socket is available

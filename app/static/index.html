@@ -18,7 +18,7 @@
       <div class="logo-icon">⏱</div>
       <div>
         <div class="logo-text">CronDock</div>
-        <div class="logo-sub">v1.4.1</div>
+        <div class="logo-sub">v1.4.2</div>
       </div>
     </div>
 
@@ -86,7 +86,7 @@
           <span class="path-badge">/data/scripts/</span>
         </div>
         <div class="topbar-actions">
-          <input type="text" id="script-search-input" class="form-input" placeholder="Search scripts…" style="width:200px;font-size:12.5px;padding:5px 10px;" oninput="filterScriptsList()" />
+          <input type="text" id="script-search-input" class="form-input" placeholder="Search scripts…" style="flex: 1 1 0; min-width: 0; width: auto; max-width: 220px; font-size: 12.5px; padding: 5px 10px;" oninput="filterScriptsList()" />
           <input type="file" id="script-file-input" style="display:none;" onchange="handleScriptFileUpload(event)" accept=".sh,.py,.bash,.txt,.json,.conf" multiple />
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('script-file-input').click()">📤 Upload</button>
           <button class="btn btn-primary btn-sm" onclick="openScriptEditor(null)">＋ New Script</button>
@@ -127,7 +127,7 @@
 
       <!-- Filter bar -->
       <div class="tl-filters">
-        <select class="form-select" id="tl-filter-job" onchange="tlApplyFilter()" style="max-width:200px;font-size:13px;">
+        <select class="form-select" id="tl-filter-job" onchange="tlApplyFilter()" style="flex: 1 1 0; min-width: 0; width: auto; max-width: 220px; font-size: 13px;">
           <option value="">All Jobs</option>
         </select>
         <div class="tl-legend">

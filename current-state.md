@@ -3,7 +3,7 @@
 ## Architecture & Overview
 - **Service**: CronDock — Visual cron job manager with web UI
 - **Active Repository**: `mtcdtech/crondock` (canonical repository, `main` branch)
-- **Active Version**: `1.4.1`
+- **Active Version**: `1.4.2`
 - **Deployment Target**: Ben-Mac-Mini (Abraham Portainer endpoint 3)
 - **Public URL**: `https://cron.abraham16.com`
 - **Authentication**: Authentik SSO OIDC (`https://auth.abraham16.com`) + Programmatic API Token (`X-API-Key` header)
@@ -30,7 +30,12 @@
   2. `Docker Images Cleanup — Abraham Synology` (`35 3 * * *`): Prunes dangling/unused images on Abraham Synology NAS (Endpoint 5).
   3. `Docker Containers Cleanup — Mac Mini` (`40 3 * * *`): Prunes stopped/unused containers on Ben-Mac-Mini (Endpoint 3) — **Enabled & Verified**.
   4. `Docker Images Cleanup — Mac Mini` (`45 3 * * *`): Prunes dangling/unused images on Ben-Mac-Mini (Endpoint 3) — **Enabled & Verified**.
-- **Container**: `benny2168/crondock:1.4.1` running with mounts for `/data`, `/var/run/docker.sock`, `/root/.ssh` (id_ed25519 + known_hosts), `/host-backups`, `/nginx-proxy-src/data`, and `/nginx-proxy-src/letsencrypt`.
+- **Container**: `benny2168/crondock:1.4.2` running with mounts for `/data`, `/var/run/docker.sock`, `/root/.ssh` (id_ed25519 + known_hosts), `/host-backups`, `/nginx-proxy-src/data`, and `/nginx-proxy-src/letsencrypt`.
+- **Security & Release Hardening (v1.4.2)**:
+  - All secrets externalized from git-tracked files into `.env` (gitignored) and CronDock's SQLite `settings` table; secrets with `is_secret=True` are masked (`••••••••••••`) in `GET /api/settings` and preserved on masked updates.
+  - Shell jobs (`_run_shell`) and in-browser script test runs (`test_run_script`) automatically receive all CronDock `settings` as environment variables (`extra_env`), and HTTP jobs follow redirects (`follow_redirects=True`).
+  - Security headers (`Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: SAMEORIGIN`, `Referrer-Policy: strict-origin-when-cross-origin`), `/robots.txt`, `/sitemap.xml` (404), and unknown `/api/*` 404 JSON responses enforced.
+  - Automated test suite (`tests/test_crondock.py`) passing 100% (6/6 tests) and zero findings across `audit-security.mjs`, `audit-ui-static.mjs`, and `audit-pii.mjs`.
 - **Validation**: All 11 active jobs (Abraham + MTCD) tested, enabled, and verified green (`last_run_success = 1`) in production.
 - **Multi-Instance Vaultwarden Sync Active**:
   - **Job #9: Vaultwarden Sync (MTCD <-> Abraham)** (`0 3 * * *`): Synchronizes logins, TOTP 2FA seeds, and Passkeys (FIDO2 credentials) between `pw.mtcd.org` (`tech@mtcd.org`, folders `Sync to Abraham` / `Sync from Abraham`) and `pw.abraham16.com` (`ben@abraham16.com`, folders `Sync to MTCD` / `Sync from MTCD`).

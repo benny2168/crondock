@@ -99,15 +99,15 @@ def seed_defaults():
     try:
         # ── Global settings ──────────────────────────────────────────────
         defaults = [
-            ("ABRAHAM_PORTAINER_URL",          "https://docker.abraham16.com",                         "Abraham Portainer base URL",           False),
-            ("ABRAHAM_PORTAINER_TOKEN",         "ptr_LAYVFvw5+DscmC2s2QsM+5aeO6iXGYcR4+KwjH7f/eU=",   "Abraham Portainer API token",           True),
-            ("ABRAHAM_SYNOLOGY_ENDPOINT_ID",   "5",                                                    "Abraham Synology Docker endpoint ID",  False),
-            ("ABRAHAM_MACMINI_ENDPOINT_ID",    "3",                                                    "Abraham Mac Mini Docker endpoint ID",  False),
-            ("ABRAHAM_PORTAINER_ENDPOINT_ID",   "5",                                                    "Legacy Abraham Docker endpoint ID",    False),
-            ("MTCD_PORTAINER_URL",              "https://docker.mtcd.org",                              "MTCD Portainer base URL",              False),
-            ("MTCD_PORTAINER_TOKEN",            "ptr_caKh16OVXC+3G4shu9s7TXtumDZY04R6wwaOYkq+Pls=",   "MTCD Portainer API token",              True),
-            ("MTCD_PORTAINER_ENDPOINT_ID",      "2",                                                    "MTCD Synology Docker endpoint ID",     False),
-            ("API_KEY",                         "",                                                     "API token for programmatic job/setting management via X-API-Key header. Set this to a random 32+ character string; leave empty to disable API auth.", True),
+            ("ABRAHAM_PORTAINER_URL",          os.getenv("ABRAHAM_PORTAINER_URL", "https://docker.abraham16.com"), "Abraham Portainer base URL",           False),
+            ("ABRAHAM_PORTAINER_TOKEN",        os.getenv("ABRAHAM_PORTAINER_TOKEN", ""),                           "Abraham Portainer API token",          True),
+            ("ABRAHAM_SYNOLOGY_ENDPOINT_ID",   "5",                                                                "Abraham Synology Docker endpoint ID",  False),
+            ("ABRAHAM_MACMINI_ENDPOINT_ID",    "3",                                                                "Abraham Mac Mini Docker endpoint ID",  False),
+            ("ABRAHAM_PORTAINER_ENDPOINT_ID",  "5",                                                                "Legacy Abraham Docker endpoint ID",    False),
+            ("MTCD_PORTAINER_URL",             os.getenv("MTCD_PORTAINER_URL", "https://docker.mtcd.org"),         "MTCD Portainer base URL",              False),
+            ("MTCD_PORTAINER_TOKEN",           os.getenv("MTCD_PORTAINER_TOKEN", ""),                              "MTCD Portainer API token",             True),
+            ("MTCD_PORTAINER_ENDPOINT_ID",     "2",                                                                "MTCD Synology Docker endpoint ID",     False),
+            ("API_KEY",                        os.getenv("API_KEY", ""),                                           "API token for programmatic job/setting management via X-API-Key header. Set this to a random 32+ character string; leave empty to disable API auth.", True),
         ]
         for key, value, desc, secret in defaults:
             if not db.query(Setting).filter(Setting.key == key).first():

@@ -1,6 +1,13 @@
 # Notes for Next Session — CronDock
 
 ## Recently Completed (2026-11-09)
+**Project Finalization, Security Hardening & Test Suite Formalization (v1.4.2)**:
+- Externalized all hardcoded credentials (`OIDC_CLIENT_SECRET`, `SESSION_SECRET`, `ABRAHAM_PORTAINER_TOKEN`, `MTCD_PORTAINER_TOKEN`, `IAM_API_KEY`, `VW_STANDBY_ADMIN_TOKEN`, `VW_STANDBY_SSO_CLIENT_ID`, `VW_STANDBY_SSO_CLIENT_SECRET`) from `docker-compose*.yml`, `app/database.py`, and `scripts/` into `.env` and CronDock's `settings` table; added `.env.example`, `.dockerignore`, and updated `.gitignore`.
+- Added automatic environment variable injection of CronDock `settings` into `_run_shell` (`app/scheduler.py`) and `test_run_script` (`app/scripts_manager.py`), plus `follow_redirects=True` on HTTP jobs.
+- Added secret masking (`••••••••••••`) on `GET /api/settings`, security headers (`Content-Security-Policy`, `X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`), `/robots.txt`, `/sitemap.xml` (404), and `404 JSONResponse` for unknown `/api/*` paths.
+- Fixed UI static audit findings (`#script-search-input` and `#tl-filter-job` flex wrapping), replaced native browser `confirm()` in `closeScriptEditor()` with an inline confirmation pattern, added URL section sync (`?section=...`), and improved WCAG AA text contrast (`--muted: #94a3b8`).
+- Added formal automated test suite (`tests/test_crondock.py`, 6/6 passing) and comprehensive `README.md`.
+
 **MTCD Domain Migration & Vaultwarden Sync Self-Healing Fixes (v1.4.1)**:
 - **MTCD Portainer Cleanups (Jobs #10 & #11)**:
   - Updated `MTCD_PORTAINER_URL` in CronDock `settings` (and seed defaults in `app/database.py` + `scripts/docker-cleanup.sh`) from `https://docker.server.mtcd.org` to `https://docker.mtcd.org`, resolving `HTTP 301 Moved Permanently` failures on `POST` requests.
